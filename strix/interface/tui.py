@@ -1840,6 +1840,9 @@ class StrixTUIApp(App):  # type: ignore[misc]
             )
         except ImportError as e:
             logging.warning(f"Failed to import root agent helper for /src command: {e}")
+            self._show_slash_command_error(
+                "无法初始化 `/src` 命令，请检查当前安装是否包含完整的 `/src` 支持。"
+            )
             return True
 
         root_agent_id = get_root_agent_id()
@@ -1859,11 +1862,28 @@ class StrixTUIApp(App):  # type: ignore[misc]
             )
         except SlashCommandError as e:
             logging.warning(f"Failed to parse /src command: {e}")
+            self._show_slash_command_error(str(e), agent_id=root_agent_id)
             return True
 
         self.selected_agent_id = root_agent_id
         self._send_message_to_agent(root_agent_id, structured_message)
         return True
+
+    def _show_slash_command_error(self, message: str, agent_id: str | None = None) -> None:
+        rendered_message = f"### /src 命令错误\n{message}"
+
+        target_agent_id = self.selected_agent_id or agent_id
+        if self.tracer and target_agent_id:
+            self.tracer.log_chat_message(
+                content=rendered_message,
+                role="assistant",
+                agent_id=target_agent_id,
+                metadata={"local_notice": True, "slash_command": "src", "severity": "warning"},
+            )
+
+        self._displayed_events.clear()
+        self._update_chat_view()
+        self.notify(message, timeout=4)
 
     def _send_message_to_agent(self, agent_id: str, message: str) -> None:
         self._cancel_agent_execution(agent_id)

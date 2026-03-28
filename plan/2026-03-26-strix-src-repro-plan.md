@@ -729,6 +729,10 @@ reproducer 最终结果必须至少包含：
 - 修改 `tests/skills/test_src_repro_skills.py`，补充针对上述通用规则的字符串级回归断言
 - 已执行 `uv run pytest tests/skills/test_src_repro_skills.py -q`
 - 已执行 `uv run python -m compileall strix`
+- 修改 `strix/interface/tui.py`，在 `/src` 非法输入或 `@file` 解析失败时增加 TUI 可见错误提示，并在当前聊天面板补本地 assistant 提示消息，避免表现为静默失败
+- 修改 `tests/interface/test_tui_src_dispatch.py`，补充裸 `/src` 与错误 `@file` 的交互回归测试
+- 已执行 `uv run pytest tests/interface/test_tui_src_dispatch.py tests/interface/test_slash_commands.py tests/interface/test_tui_tool_rendering.py -q`
+- 已再次执行 `uv run python -m compileall strix`
 
 ### 当前未完成
 
@@ -738,14 +742,12 @@ reproducer 最终结果必须至少包含：
 
 ### 当前阻塞与风险
 
-- `/src` 解析失败时当前只记录 warning 日志，TUI 中还没有更明确的用户提示
 - 当前对子 agent 回传的依赖仍是 `<agent_completion_report><summary>...</summary>` 约定，后续适合补更强的集成回归
 - `/src` bundle 已落盘到 run 目录，但还没有专门的 UI 展示组件
 - 手工验收时容易把“宿主源码能力”和“sandbox 镜像能力”混淆；当前 `/src` 入口、编排、结果解析与落盘都在宿主 Python 代码，不在远端 sandbox 镜像内
 - 当前 Strix skill 机制仅支持加载单个 `.md` 技能文件，不支持像 `F:\Study\strix\Note\fx-skills` 那样按目录自动读取 `SKILL.md`、`references/`、`scripts/` 等技能包内容；这导致旧版 `fx-skills` 中的类型路由、混合场景联合判定、工具路由、脱敏规则、停止条件和证据 manifest 规则没有被当前 `/src` skills 继承
 - 上述 skill 机制差异已经实质影响当前 `/src` 行为；虽然已补第二轮通用抽象，但当前 analyzer 已从“偏宽”转为“偏保守”，会把“测试者自备普通有效登录态即可继续”的报告场景提前判成 `can_reproduce=false`
 - 当前 analyzer 仍缺少一层更细的认证前提分类：尚未明确区分“必须复用报告中的特定凭据”与“只需测试者自己具备普通有效登录态”这两类通用场景
-- 当前 `/src` 裸输入（如仅输入 `/src`）会在 `slash_commands.py` 中被判为非法命令，但 TUI 只记录 warning、不向用户展示错误提示；用户侧现象是“命令无响应”
 - `Note/` 目录仍是未跟踪状态，后续提交时需要继续避免误纳入
 
 ### 已完成验证
@@ -765,6 +767,7 @@ reproducer 最终结果必须至少包含：
 - 已通过 `/src` 相关自动化回归汇总：36 passed
 - 已通过 `tests/skills/test_src_repro_skills.py`
 - 已通过第二轮通用规则收紧后的 `tests/skills/test_src_repro_skills.py`
+- 已通过 `/src` 非法输入交互回归：`tests/interface/test_tui_src_dispatch.py`、`tests/interface/test_slash_commands.py`、`tests/interface/test_tui_tool_rendering.py`
 - 已通过 `uv run python -m compileall strix`
 
 ### 建议下一步
@@ -772,5 +775,4 @@ reproducer 最终结果必须至少包含：
 - 先按 `plan/2026-03-27-strix-src-local-acceptance.md` 执行一次“当前仓库源码宿主 + 远端 sandbox 镜像”的手工验收
 - 视需要执行一次手工 `/src @file` 验收
 - 继续围绕 analyzer 的认证前提模型做下一轮收敛：将“必须复用报告中的特定凭据”和“测试者自备普通有效登录态即可”拆成不同的通用判定分支
-- 为 `/src` 非法输入补 TUI 可见错误提示，避免裸 `/src` 或错误 `@file` 输入时表现为静默失败
 - 视需要增加 `/src` 结果专用 renderer
