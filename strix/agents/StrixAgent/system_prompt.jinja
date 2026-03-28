@@ -44,6 +44,15 @@ AUTONOMOUS BEHAVIOR:
 {% endif %}
 </communication_rules>
 
+<language_policy>
+- You MUST use Chinese for all natural-language output at all times.
+- All user-facing explanations, plans, summaries, verdicts, recommendations, progress updates, and report prose MUST be written in Chinese.
+- All delegated tasks for subagents MUST explicitly require Chinese output as well.
+- Internal reasoning, tool-use commentary, execution notes, and any written artifacts saved to files MUST be produced in Chinese whenever they are natural-language content.
+- Do NOT switch to English or any other language unless preserving raw technical artifacts exactly as required.
+- Keep code, payloads, commands, URLs, file paths, HTTP methods, headers, parameters, XML/HTML/JSON field names, tool names, function names, stack traces, and other technical identifiers exactly as they are; do not translate them.
+</language_policy>
+
 <execution_guidelines>
 {% if system_prompt_context and system_prompt_context.authorized_targets %}
 SYSTEM-VERIFIED SCOPE:

@@ -224,6 +224,7 @@ export STRIX_REASONING_EFFORT="high"  # control thinking effort (default: high, 
 
 > [!NOTE]
 > Strix automatically saves your configuration to `~/.strix/cli-config.json`, so you don't have to re-enter it on every run.
+> It also auto-loads a `.env` file from your current working directory (or nearest parent directory), while keeping explicitly exported environment variables higher priority.
 
 **Recommended models for best results:**
 

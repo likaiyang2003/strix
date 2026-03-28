@@ -166,6 +166,16 @@ class BaseAgent(metaclass=AgentMeta):
 
             self._check_agent_messages(self.state)
 
+            special_result = await self._maybe_handle_special_task(tracer)
+            if special_result is not None:
+                self.state.set_completed(special_result)
+                if not self.interactive:
+                    if tracer:
+                        tracer.update_agent_status(self.state.agent_id, "completed")
+                    return special_result
+                await self._enter_waiting_state(tracer, task_completed=True, text_response=True)
+                continue
+
             if self.state.is_waiting_for_input():
                 await self._wait_for_input()
                 continue
@@ -610,6 +620,10 @@ class BaseAgent(metaclass=AgentMeta):
         if tracer:
             tracer.update_agent_status(self.state.agent_id, "error")
         return True
+
+    async def _maybe_handle_special_task(self, tracer: Optional["Tracer"]) -> dict[str, Any] | None:
+        del tracer
+        return None
 
     def cancel_current_execution(self) -> None:
         self._force_stop = True

@@ -21,6 +21,72 @@ _agent_instances: dict[str, Any] = {}
 _agent_states: dict[str, Any] = {}
 
 
+def get_root_agent_id() -> str | None:
+    if _root_agent_id and _root_agent_id in _agent_graph["nodes"]:
+        return _root_agent_id
+
+    for agent_id, node in _agent_graph["nodes"].items():
+        if node.get("parent_id") is None:
+            return agent_id
+
+    return None
+
+
+def get_agent_instance(agent_id: str) -> Any | None:
+    return _agent_instances.get(agent_id)
+
+
+def load_skills_into_agent(agent_id: str, skill_names: list[str]) -> dict[str, Any]:
+    if not skill_names:
+        return {
+            "success": False,
+            "error": "No skills provided.",
+            "loaded_skills": [],
+        }
+
+    from strix.skills import load_skills
+
+    loaded_skill_content = load_skills(skill_names)
+    missing_skills = [
+        skill_name for skill_name in skill_names if skill_name.split("/")[-1] not in loaded_skill_content
+    ]
+    if missing_skills:
+        return {
+            "success": False,
+            "error": f"Invalid or unavailable skills: {missing_skills}",
+            "loaded_skills": [],
+        }
+
+    agent_instance = _agent_instances.get(agent_id)
+    if agent_instance is None or not hasattr(agent_instance, "llm"):
+        return {
+            "success": False,
+            "error": f"Agent '{agent_id}' is not available for runtime skill loading.",
+            "loaded_skills": [],
+        }
+
+    newly_loaded = agent_instance.llm.add_skills(skill_names)
+    already_loaded = [skill for skill in skill_names if skill not in newly_loaded]
+
+    state = _agent_states.get(agent_id)
+    if state is not None:
+        prior = state.context.get("loaded_skills", [])
+        if not isinstance(prior, list):
+            prior = []
+        merged_skills = sorted(set(prior).union(skill_names))
+        state.update_context("loaded_skills", merged_skills)
+
+        if agent_id in _agent_graph["nodes"]:
+            _agent_graph["nodes"][agent_id]["state"] = state.model_dump()
+
+    return {
+        "success": True,
+        "loaded_skills": skill_names,
+        "newly_loaded_skills": newly_loaded,
+        "already_loaded_skills": already_loaded,
+    }
+
+
 def _run_agent_in_thread(
     agent: Any, state: Any, inherited_messages: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -191,6 +257,7 @@ def create_agent(
     name: str,
     inherit_context: bool = True,
     skills: str | None = None,
+    interactive_override: bool | None = None,
 ) -> dict[str, Any]:
     try:
         parent_id = agent_state.agent_id
@@ -221,6 +288,8 @@ def create_agent(
             if hasattr(parent_agent.llm_config, "scan_mode"):
                 scan_mode = parent_agent.llm_config.scan_mode
             interactive = getattr(parent_agent.llm_config, "interactive", False)
+        if interactive_override is not None:
+            interactive = interactive_override
 
         state = AgentState(
             task=task,

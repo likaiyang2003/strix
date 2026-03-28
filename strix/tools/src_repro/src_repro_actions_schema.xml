@@ -1,0 +1,46 @@
+<tools>
+  <tool name="save_src_repro_bundle">
+    <description>Persist a `/src` reproduction bundle into the current Strix run directory.
+
+Use this after analyzer/planner/reproducer stages complete, or after `/src` precheck stops early.
+The bundle is stored under `strix_runs/&lt;run_name&gt;/src_repro/&lt;bundle_id&gt;/` with source report, analysis, plan, execution trace, final verdict, and manifest.</description>
+    <parameters>
+      <parameter name="source_report" type="string" required="true">
+        <description>The original plain-text vulnerability report used for `/src` reproduction.</description>
+      </parameter>
+      <parameter name="analysis_json" type="string" required="false">
+        <description>Analyzer output as JSON string when available. If plain text is provided, the tool will store a normalized form.</description>
+      </parameter>
+      <parameter name="reproduction_plan" type="string" required="false">
+        <description>Structured planner output for the reproduction steps.</description>
+      </parameter>
+      <parameter name="execution_trace" type="string" required="false">
+        <description>Reproducer execution notes or full execution report.</description>
+      </parameter>
+      <parameter name="final_verdict" type="string" required="false">
+        <description>Final `/src` conclusion text that should be written to `04_final_verdict.md`.</description>
+      </parameter>
+      <parameter name="source_label" type="string" required="false">
+        <description>Input source label such as `inline` or the referenced report file path.</description>
+      </parameter>
+      <parameter name="bundle_id" type="string" required="false">
+        <description>Optional deterministic bundle ID. If omitted, a new bundle ID is generated automatically.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, message, bundle_id, output_dir, files, and manifest.</description>
+    </returns>
+    <examples>
+  <function=save_src_repro_bundle>
+  <parameter=source_report>target=https://demo.local path=/admin</parameter>
+  <parameter=analysis_json>{"can_reproduce": true, "reason": "Enough details", "missing_info": []}</parameter>
+  <parameter=reproduction_plan>## Detailed Reproduction Steps
+1. Open the page</parameter>
+  <parameter=execution_trace>## 4) Final Verdict
+- verdict: reproducible</parameter>
+  <parameter=final_verdict>/src execution finished. Final verdict: reproducible</parameter>
+  <parameter=source_label>inline</parameter>
+  </function>
+    </examples>
+  </tool>
+</tools>

@@ -1,11 +1,13 @@
 import contextlib
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 
 STRIX_API_BASE = "https://models.strix.ai/api/v1"
+_DOTENV_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class Config:
@@ -187,6 +189,37 @@ def save_current_config() -> bool:
     return Config.save_current()
 
 
+def find_dotenv_file(start: Path | None = None, filename: str = ".env") -> Path | None:
+    current = (start or Path.cwd()).resolve()
+    if current.is_file():
+        current = current.parent
+
+    for directory in (current, *current.parents):
+        candidate = directory / filename
+        if candidate.is_file():
+            return candidate
+
+    return None
+
+
+def load_dotenv_file(path: Path | None = None, *, override: bool = False) -> Path | None:
+    dotenv_path = path.resolve() if path is not None else find_dotenv_file()
+    if dotenv_path is None or not dotenv_path.is_file():
+        return None
+
+    content = dotenv_path.read_text(encoding="utf-8-sig")
+    for raw_line in content.splitlines():
+        parsed = _parse_dotenv_line(raw_line)
+        if parsed is None:
+            continue
+
+        key, value = parsed
+        if override or key not in os.environ:
+            os.environ[key] = value
+
+    return dotenv_path
+
+
 def resolve_llm_config() -> tuple[str | None, str | None, str | None]:
     """Resolve LLM model, api_key, and api_base based on STRIX_LLM prefix.
 
@@ -213,3 +246,75 @@ def resolve_llm_config() -> tuple[str | None, str | None, str | None]:
         )
 
     return model, api_key, api_base
+
+
+def _parse_dotenv_line(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+
+    if stripped.startswith("export "):
+        stripped = stripped[7:].lstrip()
+
+    if "=" not in stripped:
+        return None
+
+    key, raw_value = stripped.split("=", 1)
+    key = key.strip()
+    if not _DOTENV_KEY_PATTERN.match(key):
+        return None
+
+    return key, _parse_dotenv_value(raw_value.strip())
+
+
+def _parse_dotenv_value(value: str) -> str:
+    if not value:
+        return ""
+
+    if value[0] in {'"', "'"}:
+        return _parse_quoted_dotenv_value(value)
+
+    return _strip_unquoted_dotenv_comment(value)
+
+
+def _parse_quoted_dotenv_value(value: str) -> str:
+    quote = value[0]
+    chars: list[str] = []
+    index = 1
+
+    while index < len(value):
+        char = value[index]
+        if char == quote:
+            return "".join(chars)
+
+        if quote == '"' and char == "\\":
+            index += 1
+            if index >= len(value):
+                chars.append("\\")
+                break
+            chars.append(_decode_dotenv_escape(value[index]))
+            index += 1
+            continue
+
+        chars.append(char)
+        index += 1
+
+    return value
+
+
+def _decode_dotenv_escape(char: str) -> str:
+    escapes = {
+        "n": "\n",
+        "r": "\r",
+        "t": "\t",
+        "\\": "\\",
+        '"': '"',
+    }
+    return escapes.get(char, char)
+
+
+def _strip_unquoted_dotenv_comment(value: str) -> str:
+    for index, char in enumerate(value):
+        if char == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index].rstrip()
+    return value.rstrip()

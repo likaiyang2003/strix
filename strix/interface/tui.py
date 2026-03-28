@@ -29,6 +29,11 @@ from textual.widgets import Button, Label, Static, TextArea, Tree
 from textual.widgets.tree import TreeNode
 
 from strix.agents.StrixAgent import StrixAgent
+from strix.interface.slash_commands import (
+    SlashCommandError,
+    build_src_dispatch,
+    is_slash_command,
+)
 from strix.interface.streaming_parser import parse_streaming_content
 from strix.interface.tool_components.agent_message_renderer import AgentMessageRenderer
 from strix.interface.tool_components.registry import get_tool_renderer
@@ -199,7 +204,8 @@ class HelpScreen(ModalScreen):  # type: ignore[misc]
             Label("Strix Help", id="help_title"),
             Label(
                 "F1        Help\nCtrl+Q/C  Quit\nESC       Stop Agent\n"
-                "Enter     Send message to agent\nTab       Switch panels\n↑/↓       Navigate tree",
+                "Enter     Send message to agent\nTab       Switch panels\n↑/↓       Navigate tree\n"
+                "/src      Start SRC repro task (/src <text> or /src @file)",
                 id="help_content",
             ),
             id="dialog",
@@ -1066,6 +1072,8 @@ class StrixTUIApp(App):  # type: ignore[misc]
         """Recursively append a renderable's text content to a combined Text."""
         if isinstance(item, Text):
             combined.append_text(StrixTUIApp._sanitize_text(item))
+        elif isinstance(item, Static):
+            StrixTUIApp._append_renderable(combined, item.content)
         elif isinstance(item, Group):
             for j, sub in enumerate(item.renderables):
                 if j > 0:
@@ -1077,6 +1085,17 @@ class StrixTUIApp(App):  # type: ignore[misc]
                 StrixTUIApp._append_renderable(combined, inner)
             else:
                 combined.append(str(item))
+
+    @staticmethod
+    def _extract_widget_content(widget: Any) -> Any:
+        renderable = getattr(widget, "renderable", None)
+        if renderable is not None:
+            return renderable
+
+        if isinstance(widget, Static):
+            return widget.content
+
+        return widget
 
     def _get_rendered_events_content(self, events: list[dict[str, Any]]) -> Any:
         renderables: list[Any] = []
@@ -1166,7 +1185,7 @@ class StrixTUIApp(App):  # type: ignore[misc]
         renderer = get_tool_renderer(tool_name)
         if renderer:
             widget = renderer.render(tool_data)
-            return widget.renderable
+            return self._extract_widget_content(widget)
 
         return self._render_default_streaming_tool(tool_name, args, is_complete)
 
@@ -1704,7 +1723,7 @@ class StrixTUIApp(App):  # type: ignore[misc]
 
         if renderer:
             widget = renderer.render(tool_data)
-            return widget.renderable
+            return self._extract_widget_content(widget)
 
         text = Text()
 
@@ -1796,52 +1815,98 @@ class StrixTUIApp(App):  # type: ignore[misc]
                 node.expand()
 
     def _send_user_message(self, message: str) -> None:
+        if self._handle_slash_command(message):
+            self.call_after_refresh(self._focus_chat_input)
+            return
+
         if not self.selected_agent_id:
             return
 
-        if self.tracer:
-            streaming_content = self.tracer.get_streaming_content(self.selected_agent_id)
-            if streaming_content and streaming_content.strip():
-                self.tracer.clear_streaming_content(self.selected_agent_id)
-                self.tracer.interrupted_content[self.selected_agent_id] = streaming_content
-                self.tracer.log_chat_message(
-                    content=streaming_content,
-                    role="assistant",
-                    agent_id=self.selected_agent_id,
-                    metadata={"interrupted": True},
+        self._send_message_to_agent(self.selected_agent_id, message)
+        self.call_after_refresh(self._focus_chat_input)
+
+    def _handle_slash_command(self, message: str) -> bool:
+        if not is_slash_command(message):
+            return False
+
+        stripped = message.strip()
+        if not stripped.startswith("/src"):
+            return False
+
+        try:
+            from strix.tools.agents_graph.agents_graph_actions import (
+                get_root_agent_id,
+                load_skills_into_agent,
+            )
+        except ImportError as e:
+            logging.warning(f"Failed to import root agent helper for /src command: {e}")
+            return True
+
+        root_agent_id = get_root_agent_id()
+        if root_agent_id:
+            load_result = load_skills_into_agent(root_agent_id, ["src_repro_root"])
+            if not load_result.get("success"):
+                logging.warning(
+                    "Failed to preload /src root skill into agent %s: %s",
+                    root_agent_id,
+                    load_result.get("error", "unknown error"),
                 )
 
         try:
-            from strix.tools.agents_graph.agents_graph_actions import _agent_instances
+            root_agent_id, structured_message = build_src_dispatch(
+                stripped,
+                root_agent_id=root_agent_id,
+            )
+        except SlashCommandError as e:
+            logging.warning(f"Failed to parse /src command: {e}")
+            return True
 
-            if self.selected_agent_id in _agent_instances:
-                agent_instance = _agent_instances[self.selected_agent_id]
-                if hasattr(agent_instance, "cancel_current_execution"):
-                    agent_instance.cancel_current_execution()
-        except (ImportError, AttributeError, KeyError):
-            pass
+        self.selected_agent_id = root_agent_id
+        self._send_message_to_agent(root_agent_id, structured_message)
+        return True
+
+    def _send_message_to_agent(self, agent_id: str, message: str) -> None:
+        self._cancel_agent_execution(agent_id)
 
         if self.tracer:
             self.tracer.log_chat_message(
                 content=message,
                 role="user",
-                agent_id=self.selected_agent_id,
+                agent_id=agent_id,
             )
 
         try:
             from strix.tools.agents_graph.agents_graph_actions import send_user_message_to_agent
 
-            send_user_message_to_agent(self.selected_agent_id, message)
+            send_user_message_to_agent(agent_id, message)
 
         except (ImportError, AttributeError) as e:
-            import logging
-
-            logging.warning(f"Failed to send message to agent {self.selected_agent_id}: {e}")
+            logging.warning(f"Failed to send message to agent {agent_id}: {e}")
 
         self._displayed_events.clear()
         self._update_chat_view()
 
-        self.call_after_refresh(self._focus_chat_input)
+    def _cancel_agent_execution(self, agent_id: str) -> None:
+        if self.tracer:
+            streaming_content = self.tracer.get_streaming_content(agent_id)
+            if streaming_content and streaming_content.strip():
+                self.tracer.clear_streaming_content(agent_id)
+                self.tracer.interrupted_content[agent_id] = streaming_content
+                self.tracer.log_chat_message(
+                    content=streaming_content,
+                    role="assistant",
+                    agent_id=agent_id,
+                    metadata={"interrupted": True},
+                )
+
+        try:
+            from strix.tools.agents_graph.agents_graph_actions import get_agent_instance
+
+            agent_instance = get_agent_instance(agent_id)
+            if agent_instance is not None and hasattr(agent_instance, "cancel_current_execution"):
+                agent_instance.cancel_current_execution()
+        except (ImportError, AttributeError, KeyError):
+            pass
 
     def _get_agent_name(self, agent_id: str) -> str:
         try:

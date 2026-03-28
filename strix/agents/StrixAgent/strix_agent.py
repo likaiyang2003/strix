@@ -1,7 +1,14 @@
+import asyncio
+import json
 from typing import Any
 
 from strix.agents.base_agent import BaseAgent
 from strix.llm.config import LLMConfig
+from strix.src_repro import (
+    extract_summary_from_completion_report,
+    parse_src_repro_task_message,
+    run_src_repro_flow,
+)
 
 
 class StrixAgent(BaseAgent):
@@ -126,3 +133,173 @@ class StrixAgent(BaseAgent):
             task_description += f"\n\nSpecial instructions: {user_instructions}"
 
         return await self.agent_loop(task=task_description)
+
+    async def _maybe_handle_special_task(self, tracer: Any) -> dict[str, Any] | None:
+        if self.state.parent_id is not None:
+            return None
+
+        src_task = self._get_pending_src_repro_task()
+        if src_task is None:
+            return None
+
+        self.state.update_context("last_handled_src_repro_message", src_task.original_message)
+        emit_message = lambda content: self._emit_src_repro_message(content, tracer)
+
+        try:
+            result = await run_src_repro_flow(
+                src_task.original_message,
+                run_stage=self._run_src_repro_stage,
+                emit_message=emit_message,
+            )
+        except (RuntimeError, TimeoutError, ValueError) as exc:
+            failure_message = (
+                f"/src orchestration failed for `{src_task.source_label}`.\n"
+                f"Reason: {exc}"
+            )
+            emit_message(failure_message)
+            return {
+                "mode": "src_reproduction",
+                "source_label": src_task.source_label,
+                "analysis": None,
+                "reproduction_plan": None,
+                "execution_report": None,
+                "final_verdict": "blocked",
+                "final_summary": failure_message,
+                "error": str(exc),
+            }
+
+        persist_result = self._persist_src_repro_bundle(src_task, result, tracer)
+        if persist_result.get("success"):
+            result["artifacts"] = persist_result
+            output_dir = persist_result.get("output_dir")
+            if isinstance(output_dir, str) and output_dir:
+                emit_message(f"/src artifacts saved to `{output_dir}`.")
+        else:
+            emit_message(
+                "/src artifacts were not persisted.\n"
+                f"Reason: {persist_result.get('message', 'unknown error')}"
+            )
+
+        return result
+
+    def _get_pending_src_repro_task(self) -> Any | None:
+        last_handled = self.state.context.get("last_handled_src_repro_message")
+
+        for message in reversed(self.state.get_conversation_history()):
+            if message.get("role") != "user":
+                continue
+
+            content = message.get("content")
+            if not isinstance(content, str) or content == last_handled:
+                continue
+
+            parsed = parse_src_repro_task_message(content)
+            if parsed is not None:
+                return parsed
+
+        return None
+
+    async def _run_src_repro_stage(self, stage_name: str, skill_name: str, task_text: str) -> str:
+        from strix.tools.agents_graph.agents_graph_actions import create_agent
+
+        creation_result = create_agent(
+            self.state,
+            task=task_text,
+            name=stage_name,
+            inherit_context=False,
+            skills=skill_name,
+            interactive_override=False,
+        )
+        if not creation_result.get("success") or not creation_result.get("agent_id"):
+            raise RuntimeError(
+                f"Failed to create {stage_name}: {creation_result.get('error', 'unknown error')}"
+            )
+
+        return await self._wait_for_src_repro_stage_summary(creation_result["agent_id"])
+
+    async def _wait_for_src_repro_stage_summary(self, child_agent_id: str) -> str:
+        from strix.tools.agents_graph.agents_graph_actions import (
+            _agent_graph,
+            _agent_messages,
+            stop_agent,
+        )
+
+        timeout_seconds = max(300, int(getattr(self.llm_config, "timeout", 300)) * 3)
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+
+        while asyncio.get_running_loop().time() < deadline:
+            parent_messages = _agent_messages.get(self.state.agent_id, [])
+            for message in parent_messages:
+                if message.get("from") != child_agent_id:
+                    continue
+
+                content = message.get("content", "")
+                summary = extract_summary_from_completion_report(content)
+                if summary:
+                    message["read"] = True
+                    message["src_repro_consumed"] = True
+                    return summary
+
+            node = _agent_graph["nodes"].get(child_agent_id, {})
+            status = node.get("status")
+            if status in {"failed", "error", "stopped"}:
+                raise RuntimeError(f"/src child agent {child_agent_id} ended with status {status}")
+
+            await asyncio.sleep(0.5)
+
+        stop_agent(child_agent_id)
+        raise TimeoutError(f"/src child agent {child_agent_id} timed out")
+
+    def _emit_src_repro_message(self, content: str, tracer: Any | None) -> None:
+        self.state.add_message("assistant", content)
+        if tracer:
+            tracer.log_chat_message(
+                content=content,
+                role="assistant",
+                agent_id=self.state.agent_id,
+                metadata={"src_repro": True},
+            )
+
+    def _persist_src_repro_bundle(
+        self,
+        task: Any,
+        result: dict[str, Any],
+        tracer: Any | None,
+    ) -> dict[str, Any]:
+        from strix.tools.src_repro import save_src_repro_bundle
+
+        analysis_value = result.get("analysis")
+        analysis_json = ""
+        if analysis_value is not None:
+            analysis_json = json.dumps(analysis_value, ensure_ascii=False, indent=2)
+
+        execution_id = None
+        if tracer:
+            execution_id = tracer.log_tool_execution_start(
+                self.state.agent_id,
+                "save_src_repro_bundle",
+                {
+                    "source_label": task.source_label,
+                    "has_analysis": bool(analysis_json),
+                    "has_plan": bool(result.get("reproduction_plan")),
+                    "has_execution_trace": bool(result.get("execution_report")),
+                },
+            )
+
+        tool_result = save_src_repro_bundle(
+            source_report=task.report_text,
+            analysis_json=analysis_json,
+            reproduction_plan=result.get("reproduction_plan"),
+            execution_trace=result.get("execution_report"),
+            final_verdict=result.get("final_summary"),
+            source_label=task.source_label,
+        )
+
+        if tracer and execution_id:
+            tracer.update_tool_execution(
+                execution_id,
+                "completed" if tool_result.get("success") else "error",
+                tool_result,
+            )
+
+        return tool_result

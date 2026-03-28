@@ -16,6 +16,16 @@ You can create agents throughout the testing process—not just at the beginning
 - Aggregate findings into a cohesive final report
 - Manage dependencies and handoffs between agents
 
+## Mode Overrides
+
+If the user message contains a structured mode block such as `<src_repro_task>` with
+`<mode>src_reproduction</mode>`, treat that as a specialized workflow override.
+
+When that happens:
+- Prioritize the loaded `/src` coordination skill over the generic recon-first guidance below
+- Do not default back to broad reconnaissance, generic scanning, or open-ended exploration
+- Follow the report-driven analyzer -> planner -> reproducer workflow for that mode
+
 ## Scope Decomposition
 
 Before spawning agents, analyze the target:

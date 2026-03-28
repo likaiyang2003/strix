@@ -17,11 +17,12 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from strix.config import Config, apply_saved_config, save_current_config
+from strix.config import Config, apply_saved_config, load_dotenv_file, save_current_config
 from strix.config.config import resolve_llm_config
 from strix.llm.utils import resolve_strix_model
 
 
+load_dotenv_file()
 apply_saved_config()
 
 from strix.interface.cli import run_cli  # noqa: E402

@@ -25,6 +25,7 @@ from .registry import (
     tools,
 )
 from .reporting import *  # noqa: F403
+from .src_repro import *  # noqa: F403
 from .terminal import *  # noqa: F403
 from .thinking import *  # noqa: F403
 from .todo import *  # noqa: F403

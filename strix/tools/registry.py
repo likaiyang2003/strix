@@ -7,7 +7,10 @@ from inspect import signature
 from pathlib import Path
 from typing import Any
 
-import defusedxml.ElementTree as DefusedET
+try:
+    import defusedxml.ElementTree as DefusedET
+except ImportError:  # pragma: no cover - fallback for lightweight/dev environments
+    import xml.etree.ElementTree as DefusedET
 
 from strix.utils.resource_paths import get_strix_resource_path
 

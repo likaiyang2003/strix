@@ -470,7 +470,7 @@ reproducer 最终结果必须至少包含：
 
 ## 9. 详细实施阶段
 
-### Phase 1：命令入口与最小骨架
+### Phase 1：命令入口与最小骨架（已完成）
 
 目标：
 
@@ -662,3 +662,115 @@ reproducer 最终结果必须至少包含：
 - 增加 DOCX 输出
 - 增加 replay / resume
 - 为 `/src` 结果增加专用 renderer
+
+## 15. 当前执行状态（2026-03-28）
+
+### 当前阶段
+
+- 已完成 Phase 1：命令入口与最小骨架
+- 已完成 Phase 2：skill 与 agent 编排首版接入
+- 已完成 Phase 3：结果解析与 prompt budget 已接入真实 `/src` root 编排
+- 已完成 Phase 4：结果落盘与 `save_src_repro_bundle` 已接入
+- Phase 5 进行中：最小闭环集成测试已补齐，剩余手工验收可按需执行
+
+### 本次已完成
+
+- 新增 `strix/interface/slash_commands.py`，完成 `/src <text>` 与 `/src @file` 解析
+- 新增结构化 `<src_repro_task>` 消息构造，统一把 `report_text` 注入 root agent
+- 修改 `strix/interface/tui.py`，让 `/src` 强制路由到 root agent，而不是当前选中的子 agent
+- 修改 `strix/interface/tui.py`，补充 `/src` help 文案，并抽出通用消息发送与取消执行逻辑
+- 修改 `strix/tools/agents_graph/agents_graph_actions.py`，新增 `get_root_agent_id()` 与 `get_agent_instance()`
+- 修改 `strix/interface/__init__.py`，改为延迟导入 `main`，降低测试时的导入副作用
+- 修改 `strix/tools/registry.py`，为 `defusedxml` 缺失场景增加标准库回退，保证轻量测试环境可运行
+- 新增 `tests/interface/test_slash_commands.py`
+- 新增 `tests/interface/test_tui_src_dispatch.py`
+- 新增 `tests/tools/test_agents_graph_host_helpers.py`
+- 新增 `strix/skills/coordination/src_repro_root.md`
+- 新增 `strix/skills/src_report/report_repro_analyzer.md`
+- 新增 `strix/skills/src_report/report_to_repro_checklist.md`
+- 新增 `strix/skills/src_report/repro_plan_executor.md`
+- 修改 `strix/skills/coordination/root_agent.md`，加入 `<src_repro_task>` 模式覆盖规则
+- 修改 `strix/tools/agents_graph/agents_graph_actions.py`，新增宿主侧 `load_skills_into_agent()` 以支持运行时注入 `/src` root skill
+- 修改 `strix/interface/tui.py`，在 `/src` 派发前自动向 root agent 注入 `src_repro_root`
+- 新增 `tests/tools/test_agents_graph_skill_loading.py`
+- 新增 `tests/skills/test_src_repro_skills.py`
+- 新增 `strix/src_repro/__init__.py`
+- 新增 `strix/src_repro/contracts.py`
+- 新增 `strix/src_repro/result_parser.py`
+- 新增 `strix/src_repro/prompt_budget.py`
+- 新增 `strix/src_repro/orchestration.py`
+- 修改 `strix/agents/base_agent.py`，增加 root 级特殊任务钩子 `_maybe_handle_special_task()`
+- 修改 `strix/agents/StrixAgent/strix_agent.py`，让 root agent 在收到 `<src_repro_task>` 后走确定性的 analyzer -> planner -> reproducer 编排
+- 修改 `strix/tools/agents_graph/agents_graph_actions.py`，为内部编排新增 `interactive_override` 支持，让 `/src` 子 agent 以非交互模式真正结束并回传结果
+- 新增 `strix/src_repro/output.py`
+- 新增 `strix/tools/src_repro/__init__.py`
+- 新增 `strix/tools/src_repro/src_repro_actions.py`
+- 新增 `strix/tools/src_repro/src_repro_actions_schema.xml`
+- 修改 `strix/tools/__init__.py`，注册 `/src` 结果落盘工具
+- 修改 `strix/agents/StrixAgent/strix_agent.py`，在 `/src` 编排收尾时调用 `save_src_repro_bundle` 并回填 artifacts
+- 新增 `tests/src_repro/test_result_parser.py`
+- 新增 `tests/src_repro/test_prompt_budget.py`
+- 新增 `tests/src_repro/test_orchestration.py`
+- 新增 `tests/src_repro/test_output.py`
+- 新增 `tests/agents/test_strix_src_repro_runtime.py`
+- 新增 `tests/tools/test_src_repro_actions.py`
+- 新增 `tests/integration/test_src_repro_minimal_flow.py`
+- 修改 `strix/config/config.py`，新增 `.env` 自动发现与加载逻辑，支持从当前工作目录或最近父目录读取模型与运行配置
+- 修改 `strix/interface/main.py`，在应用入口最前面自动加载 `.env`，并保持显式环境变量优先于 `.env`
+- 新增 `tests/config/test_config_dotenv.py`
+- 修改 `strix/interface/tui.py`，修复工具 renderer 返回 `Static` 时访问 `.renderable` 导致的 TUI 崩溃
+- 新增 `tests/interface/test_tui_tool_rendering.py`
+- 修改 `strix/skills/src_report/report_repro_analyzer.md`，补充类型路由、混合场景联合判定、认证材料阻塞规则和标准 `missing_info` 短句
+- 修改 `strix/skills/src_report/report_to_repro_checklist.md`，补充当前 Strix 工具路由、API 优先规划、敏感字段脱敏和最终证据采集步骤约束
+- 修改 `strix/skills/src_report/repro_plan_executor.md`，补充输入完整性校验、工具优先级、`execute_js` 使用边界、计划外探索禁止和止损收口规则
+- 再次修改 `strix/skills/src_report/report_repro_analyzer.md`，将认证相关信息抽象为 `execution_prerequisite`、`historical_packet_evidence`、`success_marker`、`post_exploitation_result` 等通用字段角色，并补充 `Authorization: bearer null` 不能单独证明“无需认证”的规则
+- 再次修改 `strix/skills/src_report/report_to_repro_checklist.md`，补充 role-aware planning 规则，禁止把历史抓包、成功后泄露结果或成功标志写入 `## Preconditions` 或执行输入
+- 再次修改 `strix/skills/src_report/repro_plan_executor.md`，补充 decisive validation 规则，要求只有真正完成目标侧验证时才能输出 `not reproducible`，代理/工具/环境阻塞统一归类为 `blocked`
+- 修改 `tests/skills/test_src_repro_skills.py`，补充针对上述通用规则的字符串级回归断言
+- 已执行 `uv run pytest tests/skills/test_src_repro_skills.py -q`
+- 已执行 `uv run python -m compileall strix`
+
+### 当前未完成
+
+- 尚未执行手工 `/src @file` 路径验收
+- 尚未按“当前仓库源码宿主 + 远端 sandbox 镜像”模式完成一轮手工验收
+- 尚未补 `/src` 结果在 TUI 中的专用 renderer
+
+### 当前阻塞与风险
+
+- `/src` 解析失败时当前只记录 warning 日志，TUI 中还没有更明确的用户提示
+- 当前对子 agent 回传的依赖仍是 `<agent_completion_report><summary>...</summary>` 约定，后续适合补更强的集成回归
+- `/src` bundle 已落盘到 run 目录，但还没有专门的 UI 展示组件
+- 手工验收时容易把“宿主源码能力”和“sandbox 镜像能力”混淆；当前 `/src` 入口、编排、结果解析与落盘都在宿主 Python 代码，不在远端 sandbox 镜像内
+- 当前 Strix skill 机制仅支持加载单个 `.md` 技能文件，不支持像 `F:\Study\strix\Note\fx-skills` 那样按目录自动读取 `SKILL.md`、`references/`、`scripts/` 等技能包内容；这导致旧版 `fx-skills` 中的类型路由、混合场景联合判定、工具路由、脱敏规则、停止条件和证据 manifest 规则没有被当前 `/src` skills 继承
+- 上述 skill 机制差异已经实质影响当前 `/src` 行为；虽然已补第二轮通用抽象，但当前 analyzer 已从“偏宽”转为“偏保守”，会把“测试者自备普通有效登录态即可继续”的报告场景提前判成 `can_reproduce=false`
+- 当前 analyzer 仍缺少一层更细的认证前提分类：尚未明确区分“必须复用报告中的特定凭据”与“只需测试者自己具备普通有效登录态”这两类通用场景
+- 当前 `/src` 裸输入（如仅输入 `/src`）会在 `slash_commands.py` 中被判为非法命令，但 TUI 只记录 warning、不向用户展示错误提示；用户侧现象是“命令无响应”
+- `Note/` 目录仍是未跟踪状态，后续提交时需要继续避免误纳入
+
+### 已完成验证
+
+- 已通过 `tests/interface/test_slash_commands.py`
+- 已通过 `tests/interface/test_tui_src_dispatch.py`
+- 已通过 `tests/tools/test_agents_graph_host_helpers.py`
+- 已通过 `tests/tools/test_agents_graph_skill_loading.py`
+- 已通过 `tests/skills/test_src_repro_skills.py`
+- 已通过 `tests/src_repro/test_result_parser.py`
+- 已通过 `tests/src_repro/test_prompt_budget.py`
+- 已通过 `tests/src_repro/test_orchestration.py`
+- 已通过 `tests/src_repro/test_output.py`
+- 已通过 `tests/agents/test_strix_src_repro_runtime.py`
+- 已通过 `tests/tools/test_src_repro_actions.py`
+- 已通过 `tests/integration/test_src_repro_minimal_flow.py`
+- 已通过 `/src` 相关自动化回归汇总：36 passed
+- 已通过 `tests/skills/test_src_repro_skills.py`
+- 已通过第二轮通用规则收紧后的 `tests/skills/test_src_repro_skills.py`
+- 已通过 `uv run python -m compileall strix`
+
+### 建议下一步
+
+- 先按 `plan/2026-03-27-strix-src-local-acceptance.md` 执行一次“当前仓库源码宿主 + 远端 sandbox 镜像”的手工验收
+- 视需要执行一次手工 `/src @file` 验收
+- 继续围绕 analyzer 的认证前提模型做下一轮收敛：将“必须复用报告中的特定凭据”和“测试者自备普通有效登录态即可”拆成不同的通用判定分支
+- 为 `/src` 非法输入补 TUI 可见错误提示，避免裸 `/src` 或错误 `@file` 输入时表现为静默失败
+- 视需要增加 `/src` 结果专用 renderer
