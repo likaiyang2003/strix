@@ -18,6 +18,7 @@ class SrcReproTask:
     source_label: str
     requested_root_skill: str = "src_repro_root"
     original_message: str = ""
+    skip_analysis: bool = False
 
 
 def _generate_bundle_id() -> str:

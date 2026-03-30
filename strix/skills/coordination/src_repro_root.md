@@ -1,117 +1,116 @@
 ---
 name: src-repro-root
-description: Serial report-driven /src orchestration for analyzer -> planner -> reproducer without generic recon or scan expansion
+description: 串行执行基于报告的 /src 编排流程，按 analyzer -> planner -> reproducer 顺序推进，禁止泛化 recon 或扫描扩展
 ---
 
-# /src Root Orchestration
+# /src 根级编排
 
-This skill is only active when the current task contains `<src_repro_task>` and
-`<mode>src_reproduction</mode>`.
+仅当当前任务同时包含 `<src_repro_task>` 与 `<mode>src_reproduction</mode>` 时，本 skill 才生效。
 
-When active, this skill OVERRIDES the generic root-agent workflow.
+一旦生效，本 skill 会覆盖通用 root agent 工作流。
 
-## Mission
+## 任务目标
 
-Coordinate a strict report-driven reproduction flow:
+协调一个严格的“报告驱动复现”流程：
 
-1. Analyzer determines whether the report can be reproduced
-2. Planner converts the report into structured reproduction steps
-3. Reproducer executes the approved plan with Strix tools
+1. analyzer 判断报告是否具备可复现性
+2. planner 将报告转换为结构化复现步骤
+3. reproducer 使用 Strix 工具严格执行已批准的计划
 
-Treat `<report_text>` as the only source of truth for the vulnerability details.
+将 `<report_text>` 视为漏洞细节的唯一事实来源。
 
-## Hard Constraints
+## 硬性约束
 
-- Do not perform broad reconnaissance, generic crawling, generic vulnerability scanning, or unrelated validation
-- Do not create reporting agents or fixing agents in `/src` mode
-- Do not skip analyzer or planner
-- Do not run analyzer, planner, and reproducer in parallel
-- Keep exactly one active child stage at a time
-- Do not invent persistence tools that are not currently available
+- 不得执行 broad recon、泛化爬取、泛化漏洞扫描或与当前报告无关的验证
+- 在 `/src` 模式下不得创建报告编写 agent 或修复 agent
+- 不得跳过 analyzer 或 planner
+- 不得并行运行 analyzer、planner 和 reproducer
+- 任意时刻只允许一个活跃的子阶段
+- 不得虚构当前项目中并不存在的持久化工具
 
-## Stage 1: Analyzer
+## 阶段 1：Analyzer
 
-Create one child agent with:
+创建一个子 agent：
 
-- Name: `SRC Repro Analyzer`
-- Skills: `report_repro_analyzer`
-- Responsibility: decide only `can_reproduce`, `reason`, and `missing_info`
+- 名称：`SRC 复现分析器`
+- Skills：`report_repro_analyzer`
+- 职责：只判断 `can_reproduce`、`reason`、`missing_info`
 
-The delegated task should explicitly instruct the child to:
+委派给 analyzer 的任务必须明确要求：
 
-- analyze only reproducibility readiness
-- avoid execution, planning, recon, or tool usage unless absolutely needed for reading context
-- return strict JSON only
-- place the exact final JSON string into `agent_finish.result_summary`
+- 只分析“是否具备复现准备条件”
+- 除非为了阅读上下文绝对必要，否则不得执行漏洞、制定计划、做 recon 或广泛使用工具
+- 仅返回严格 JSON
+- 必须将最终 JSON 原文写入 `agent_finish.result_summary`
 
-After creating the analyzer child:
+创建 analyzer 后：
 
-- call `wait_for_message`
-- parse the incoming `<agent_completion_report>`
-- read the analyzer JSON from the `<summary>` field
+- 调用 `wait_for_message`
+- 解析收到的 `<agent_completion_report>`
+- 从 `<summary>` 字段读取 analyzer JSON
 
-If analyzer result says `can_reproduce=false`:
+如果 analyzer 返回 `can_reproduce=false`：
 
-- stop the `/src` workflow immediately
-- do not create planner or reproducer
-- finish with a concise root-level summary that preserves the analyzer reason and missing info
+- 立即停止 `/src` 流程
+- 不再创建 planner 或 reproducer
+- 用简洁的 root 总结收口，并保留 analyzer 的 `reason` 与 `missing_info`
 
-## Stage 2: Planner
+## 阶段 2：Planner
 
-Only start this stage when analyzer returned `can_reproduce=true`.
+仅当 analyzer 返回 `can_reproduce=true` 时才启动。
 
-Create one child agent with:
+创建一个子 agent：
 
-- Name: `SRC Repro Planner`
-- Skills: `report_to_repro_checklist`
-- Responsibility: convert the report and analyzer result into structured reproduction steps
+- 名称：`SRC 复现规划器`
+- Skills：`report_to_repro_checklist`
+- 职责：把报告和 analyzer 结论转换为结构化复现步骤
 
-The delegated task should explicitly instruct the child to:
+委派给 planner 的任务必须明确要求：
 
-- preserve the original report order
-- avoid re-judging reproducibility
-- avoid inventing credentials, payloads, bypasses, or exploit chains absent from the report
-- put the full reproduction checklist into `agent_finish.result_summary`
+- 尽量保留报告原始顺序
+- 不得重新判断可复现性
+- 不得虚构凭据、payload、绕过方式或报告中不存在的利用链
+- 必须将完整复现清单写入 `agent_finish.result_summary`
 
-After creating the planner child:
+创建 planner 后：
 
-- call `wait_for_message`
-- parse the incoming `<agent_completion_report>`
-- read the full structured plan from the `<summary>` field
+- 调用 `wait_for_message`
+- 解析收到的 `<agent_completion_report>`
+- 从 `<summary>` 字段读取完整计划
 
-## Stage 3: Reproducer
+## 阶段 3：Reproducer
 
-Create one child agent with:
+创建一个子 agent：
 
-- Name: `SRC Reproducer`
-- Skills: `repro_plan_executor`
-- Responsibility: execute the plan exactly as written
+- 名称：`SRC 复现执行器`
+- Skills：`repro_plan_executor`
+- 职责：严格按计划执行
 
-The delegated task should explicitly instruct the child to:
+委派给 reproducer 的任务必须明确要求：
 
-- use the original report and planner output together
-- execute the plan in order with available browser, proxy, terminal, and python tools
-- avoid redesigning the plan
-- place the final execution report into `agent_finish.result_summary`
+- 同时使用原始报告与 planner 输出
+- 按顺序执行计划，使用现有 browser、proxy、terminal、python 工具
+- 不得重设计或重写计划
+- 必须将最终执行报告写入 `agent_finish.result_summary`
 
-After creating the reproducer child:
+创建 reproducer 后：
 
-- call `wait_for_message`
-- parse the incoming `<agent_completion_report>`
-- read the final execution report from the `<summary>` field
+- 调用 `wait_for_message`
+- 解析收到的 `<agent_completion_report>`
+- 从 `<summary>` 字段读取最终执行报告
 
-## Root Finalization
+## Root 收尾
 
-When all required stages are complete:
+当所有必要阶段完成后：
 
-- summarize the analyzer decision
-- summarize the planner output
-- summarize the reproducer verdict or the early analyzer stop reason
-- finish the root task with `finish_scan`
+- 汇总 analyzer 判定
+- 汇总 planner 产出
+- 汇总 reproducer verdict，或提前停止时的 analyzer 原因
+- 使用 `finish_scan` 完成 root 收尾
 
-Use the four `finish_scan` fields in a `/src`-specific way:
+在 `/src` 模式下，`finish_scan` 四个字段按以下方式使用：
 
-- `executive_summary`: final `/src` verdict and one-paragraph outcome
-- `methodology`: serial `analyzer -> planner -> reproducer` workflow
-- `technical_analysis`: analyzer JSON, planner checklist summary, reproducer execution summary
-- `recommendations`: missing information, blockers, or next actions
+- `executive_summary`：最终 `/src` verdict 与一段结果摘要
+- `methodology`：串行 `analyzer -> planner -> reproducer` 工作流
+- `technical_analysis`：analyzer JSON、planner 清单摘要、reproducer 执行摘要
+- `recommendations`：缺失信息、阻塞点或下一步建议

@@ -1,10 +1,84 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from strix.src_repro import SrcReproBundle, save_src_repro_bundle as persist_src_repro_bundle
 from strix.tools.registry import register_tool
+
+
+def _read_text_file(path: Path) -> str:
+    read_attempts: tuple[str | None, ...] = ("utf-8", "utf-8-sig", None)
+    last_error: UnicodeError | OSError | None = None
+
+    for encoding in read_attempts:
+        try:
+            if encoding is None:
+                return path.read_text()
+            return path.read_text(encoding=encoding)
+        except (UnicodeError, OSError) as exc:
+            last_error = exc
+
+    raise OSError(f"读取源报告失败: {last_error}") from last_error
+
+
+@register_tool(sandbox_execution=False)
+def load_src_report_source(
+    source_label: str,
+    max_chars: int = 12000,
+) -> dict[str, Any]:
+    normalized = (source_label or "").strip()
+    if not normalized:
+        return {
+            "success": False,
+            "message": "缺少 source_label，无法读取原始漏洞报告。",
+        }
+
+    if normalized == "inline":
+        return {
+            "success": False,
+            "message": "当前 `/src` 输入来源为 inline，没有可回看的文件版原始报告。",
+            "source_label": normalized,
+        }
+
+    path = Path(normalized)
+    if not path.exists():
+        return {
+            "success": False,
+            "message": f"原始漏洞报告文件不存在: {path}",
+            "source_label": normalized,
+        }
+    if not path.is_file():
+        return {
+            "success": False,
+            "message": f"原始漏洞报告路径不是文件: {path}",
+            "source_label": normalized,
+        }
+
+    try:
+        content = _read_text_file(path)
+    except OSError as exc:
+        return {
+            "success": False,
+            "message": str(exc),
+            "source_label": normalized,
+        }
+
+    normalized_limit = max(1, int(max_chars))
+    trimmed = content[:normalized_limit]
+    return {
+        "success": True,
+        "message": "已读取原始漏洞报告文件。",
+        "source_label": normalized,
+        "source_path": str(path),
+        "source_dir": str(path.parent),
+        "source_name": path.name,
+        "content": trimmed,
+        "truncated": len(content) > normalized_limit,
+        "total_chars": len(content),
+        "returned_chars": len(trimmed),
+    }
 
 
 @register_tool(sandbox_execution=False)
@@ -24,7 +98,7 @@ def save_src_repro_bundle(
         if tracer is None:
             return {
                 "success": False,
-                "message": "Current tracer not available - /src bundle not stored",
+                "message": "当前 tracer 不可用，未保存 `/src` 产物",
             }
 
         analysis_payload: dict[str, Any] | str | None
@@ -57,11 +131,11 @@ def save_src_repro_bundle(
     except Exception as e:  # noqa: BLE001
         return {
             "success": False,
-            "message": f"Failed to save /src reproduction bundle: {e!s}",
+            "message": f"保存 `/src` 产物失败：{e!s}",
         }
     else:
         return {
             "success": True,
-            "message": "Saved /src reproduction bundle",
+            "message": "已保存 `/src` 复现产物",
             **saved,
         }

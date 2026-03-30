@@ -31,7 +31,7 @@ _SENSITIVE_HINTS = (
 DEFAULT_ANALYSIS_TEXT_MAX_CHARS = 3200
 DEFAULT_PLAN_TEXT_MAX_CHARS = 3200
 DEFAULT_REPRO_TEXT_MAX_CHARS = 3600
-DEFAULT_REPRO_PLAN_MAX_CHARS = 1800
+DEFAULT_REPRO_PLAN_MAX_CHARS = 2600
 DEFAULT_PROMPT_MAX_CHARS = 5000
 MAX_LINE_CHARS = 320
 MAX_SENSITIVE_LINE_CHARS = 180
@@ -43,6 +43,28 @@ _PLAN_VERDICT_HINTS = (
     "success marker",
     "stop condition",
 )
+_SECTION_TITLE_HINTS = {
+    "detailed_reproduction_steps": (
+        "## detailed reproduction steps",
+        "detailed reproduction steps",
+    ),
+    "success_criteria": (
+        "## success criteria",
+        "success criteria",
+    ),
+    "evidence_checklist": (
+        "## evidence checklist",
+        "evidence checklist",
+    ),
+    "extracted_facts": (
+        "## extracted facts",
+        "extracted facts",
+    ),
+    "preconditions": (
+        "## preconditions",
+        "preconditions",
+    ),
+}
 
 
 def trim_for_analysis(text: str, *, max_chars: int = DEFAULT_ANALYSIS_TEXT_MAX_CHARS) -> str:
@@ -74,6 +96,10 @@ def trim_plan_for_reproduction(
     joined = "\n".join(lines)
     if len(joined) <= max_chars:
         return joined
+
+    preferred_sections = _build_preferred_reproduction_plan(lines, max_chars=max_chars)
+    if preferred_sections:
+        return preferred_sections
 
     verdict_start = _find_verdict_section_start(lines)
     if verdict_start is None:
@@ -188,6 +214,77 @@ def _find_verdict_section_start(lines: list[str]) -> int | None:
         lowered = line.lower()
         if any(hint in lowered for hint in _PLAN_VERDICT_HINTS):
             return index
+    return None
+
+
+def _build_preferred_reproduction_plan(lines: list[str], *, max_chars: int) -> str:
+    sections = _extract_plan_sections(lines)
+    detailed_section = (sections.get("detailed_reproduction_steps") or "").strip()
+    success_section = (sections.get("success_criteria") or "").strip()
+    evidence_section = (sections.get("evidence_checklist") or "").strip()
+
+    if not detailed_section and not success_section:
+        return ""
+
+    if not success_section:
+        return _trim_text(detailed_section, max_chars=max_chars)
+
+    success_len = len(success_section)
+    if success_len >= max_chars:
+        reserve_for_steps = min(max_chars // 2, 900)
+        if reserve_for_steps > 120 and detailed_section:
+            trimmed_detailed = _trim_text(detailed_section, max_chars=reserve_for_steps).strip()
+            remaining = max(max_chars - len(trimmed_detailed) - 2, 0)
+            trimmed_success = success_section[:remaining].rstrip()
+            if trimmed_detailed and trimmed_success:
+                return f"{trimmed_detailed}\n\n{trimmed_success}".rstrip()
+        return success_section[:max_chars].rstrip()
+
+    reserve_for_success = success_len + 2
+    detailed_budget = max(max_chars - reserve_for_success, 0)
+    trimmed_detailed = _trim_text(detailed_section, max_chars=detailed_budget).strip()
+
+    blocks: list[str] = []
+    if trimmed_detailed:
+        blocks.append(trimmed_detailed)
+    blocks.append(success_section)
+
+    combined = "\n\n".join(blocks).strip()
+    remaining_after_core = max(max_chars - len(combined) - (2 if evidence_section else 0), 0)
+
+    if evidence_section and remaining_after_core > 80:
+        trimmed_evidence = _trim_text(evidence_section, max_chars=remaining_after_core).strip()
+        if trimmed_evidence:
+            combined = f"{combined}\n\n{trimmed_evidence}"
+
+    return combined[:max_chars].rstrip()
+
+
+def _extract_plan_sections(lines: list[str]) -> dict[str, str]:
+    section_boundaries: list[tuple[int, str]] = []
+    for index, line in enumerate(lines):
+        section_name = _match_section_name(line)
+        if section_name:
+            section_boundaries.append((index, section_name))
+
+    sections: dict[str, str] = {}
+    for boundary_index, (start, section_name) in enumerate(section_boundaries):
+        end = (
+            section_boundaries[boundary_index + 1][0]
+            if boundary_index + 1 < len(section_boundaries)
+            else len(lines)
+        )
+        section_text = "\n".join(lines[start:end]).strip()
+        if section_text:
+            sections[section_name] = section_text
+    return sections
+
+
+def _match_section_name(line: str) -> str | None:
+    lowered = line.strip().lower()
+    for section_name, hints in _SECTION_TITLE_HINTS.items():
+        if any(lowered.startswith(hint) for hint in hints):
+            return section_name
     return None
 
 

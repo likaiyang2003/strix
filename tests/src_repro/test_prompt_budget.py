@@ -66,3 +66,56 @@ def test_trim_plan_for_reproduction_preserves_success_criteria_tail_section() ->
     assert "## Success Criteria" in trimmed
     assert "Success Marker" in trimmed
     assert "Stop Conditions" in trimmed
+
+
+def test_trim_plan_for_reproduction_prioritizes_all_steps_before_facts_and_preconditions() -> None:
+    plan = "\n".join(
+        [
+            "## Extracted Facts",
+            "- Target System: demo " + ("A" * 500),
+            "## Preconditions",
+            "- Environment: login required " + ("B" * 500),
+            "## Detailed Reproduction Steps",
+            "1. Open the homepage",
+            "2. Enter the chat page",
+            "3. Input the XSS payload",
+            "4. Submit the message",
+            "5. Validate the execution result",
+            "## Success Criteria",
+            "- Success Marker: alert pops up and shows cookie info",
+            "- Stop Conditions: stop after step 5 if the marker is absent",
+            "## Evidence Checklist",
+            "- Screenshot of popup",
+        ]
+    )
+
+    trimmed = trim_plan_for_reproduction(plan, max_chars=700)
+
+    assert len(trimmed) <= 700
+    assert "## Detailed Reproduction Steps" in trimmed
+    assert "1. Open the homepage" in trimmed
+    assert "5. Validate the execution result" in trimmed
+    assert "## Success Criteria" in trimmed
+    assert "## Extracted Facts" not in trimmed
+    assert "## Preconditions" not in trimmed
+
+
+def test_trim_plan_for_reproduction_keeps_steps_when_step_section_itself_exceeds_budget() -> None:
+    plan = "\n".join(
+        [
+            "## Detailed Reproduction Steps",
+            "1. " + ("A" * 900),
+            "2. " + ("B" * 900),
+            "3. " + ("C" * 900),
+            "## Success Criteria",
+            "- Success Marker: alert pops up and shows cookie information",
+            "- Stop Conditions: stop immediately after the final validation step",
+        ]
+    )
+
+    trimmed = trim_plan_for_reproduction(plan, max_chars=900)
+
+    assert len(trimmed) <= 900
+    assert "## Detailed Reproduction Steps" in trimmed
+    assert "## Success Criteria" in trimmed
+    assert "1. " in trimmed

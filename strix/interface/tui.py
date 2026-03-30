@@ -32,7 +32,9 @@ from strix.agents.StrixAgent import StrixAgent
 from strix.interface.slash_commands import (
     SlashCommandError,
     build_src_dispatch,
+    complete_src_report_reference,
     is_slash_command,
+    list_src_report_suggestions,
 )
 from strix.interface.streaming_parser import parse_streaming_content
 from strix.interface.tool_components.agent_message_renderer import AgentMessageRenderer
@@ -70,6 +72,17 @@ class ChatTextArea(TextArea):  # type: ignore[misc]
             event.prevent_default()
             return
 
+        if event.key == "tab" and self._app_reference:
+            text_content = str(self.text)  # type: ignore[has-type]
+            completed = self._app_reference._complete_src_file_input(text_content)
+            if completed and completed != text_content:
+                self.load_text(completed)
+                lines = completed.splitlines() or [""]
+                self.move_cursor((len(lines) - 1, len(lines[-1])))
+                self._app_reference._update_src_file_hint(completed)
+                event.prevent_default()
+                return
+
         if event.key == "enter" and self._app_reference:
             text_content = str(self.text)  # type: ignore[has-type]
             message = text_content.strip()
@@ -96,6 +109,10 @@ class ChatTextArea(TextArea):  # type: ignore[misc]
         if self.parent.styles.height != new_height:
             self.parent.styles.height = new_height
             self.scroll_cursor_visible()
+
+        if self._app_reference and hasattr(self._app_reference, "_update_src_file_hint"):
+            text_content = str(self.text)  # type: ignore[has-type]
+            self._app_reference._update_src_file_hint(text_content)
 
 
 class SplashScreen(Static):  # type: ignore[misc]
@@ -824,6 +841,8 @@ class StrixTUIApp(App):  # type: ignore[misc]
             )
             chat_input.set_app_reference(self)
             chat_input_container = Horizontal(chat_prompt, chat_input, id="chat_input_container")
+            src_input_hint = Static("", id="src_input_hint")
+            src_input_hint.ALLOW_SELECT = False
 
             agents_tree = Tree("Agents", id="agents_tree")
             agents_tree.root.expand()
@@ -846,6 +865,7 @@ class StrixTUIApp(App):  # type: ignore[misc]
             chat_area_container.mount(chat_history)
             chat_area_container.mount(agent_status_display)
             chat_area_container.mount(chat_input_container)
+            chat_area_container.mount(src_input_hint)
 
             self.call_after_refresh(self._focus_chat_input)
 
@@ -863,6 +883,39 @@ class StrixTUIApp(App):  # type: ignore[misc]
             chat_input.focus()
         except (ValueError, Exception):
             self.call_after_refresh(self._focus_chat_input)
+
+    def _update_src_file_hint(self, message: str) -> None:
+        if len(self.screen_stack) > 1 or self.show_splash or not self.is_mounted:
+            return
+
+        try:
+            hint_widget = self.query_one("#src_input_hint", Static)
+        except (ValueError, Exception):
+            return
+
+        hint_text = self._build_src_file_hint_text(message)
+        hint_widget.update(hint_text)
+        if hint_text:
+            hint_widget.remove_class("hidden")
+        else:
+            hint_widget.add_class("hidden")
+
+    def _build_src_file_hint_text(self, message: str) -> str:
+        suggestions = list_src_report_suggestions(message)
+        if suggestions is None:
+            return ""
+
+        base_dir, names = suggestions
+        if not base_dir.exists():
+            return f"SRC 报告目录不存在：{base_dir}"
+        if not names:
+            return f"SRC 报告目录：{base_dir}  当前没有匹配文件"
+
+        display_names = "  ".join(names)
+        return f"SRC 报告目录：{base_dir}\n可选文件：{display_names}"
+
+    def _complete_src_file_input(self, message: str) -> str | None:
+        return complete_src_report_reference(message)
 
     def _focus_agents_tree(self) -> None:
         if len(self.screen_stack) > 1 or self.show_splash:

@@ -1,4 +1,27 @@
 <tools>
+  <tool name="load_src_report_source">
+    <description>Read the original file-backed `/src` vulnerability report from the host side when execution hits ambiguity or missing detail.
+
+Use this only as an on-demand fallback during reproduction, not as the default planning input.
+If the current `/src` task came from inline text, this tool will report that no file-backed source is available.</description>
+    <parameters>
+      <parameter name="source_label" type="string" required="true">
+        <description>The original `/src` source label. For file-backed reports this is the absolute report path provided by the host.</description>
+      </parameter>
+      <parameter name="max_chars" type="integer" required="false">
+        <description>Maximum number of characters to return from the original report. Defaults to 12000.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Response containing: success, message, source_path, source_dir, source_name, content, truncated, total_chars, and returned_chars.</description>
+    </returns>
+    <examples>
+  <function=load_src_report_source>
+  <parameter=source_label>F:\Study\strix\Vul_report\demo-report.md</parameter>
+  <parameter=max_chars>6000</parameter>
+  </function>
+    </examples>
+  </tool>
   <tool name="save_src_repro_bundle">
     <description>Persist a `/src` reproduction bundle into the current Strix run directory.
 

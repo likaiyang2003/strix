@@ -69,6 +69,7 @@
   - 只输出结构化复现步骤
 - Reproducer：
   - 只按步骤执行，不重新设计计划
+  - 默认不重新读取原始报告；仅在执行遇到真实信息缺口时，按源信息有界回看文件版原报告
 - 宿主落盘：
   - 保存源报告、分析结果、复现计划、最终结论、执行痕迹摘要
 
@@ -425,8 +426,15 @@
 
 输入：
 
-- 原始报告
 - 复现计划
+- analysis 摘要
+- 原始报告源信息（文件路径/目录/文件名）
+
+说明：
+
+- 默认不向 reproducer 直接下发原始报告正文
+- reproducer 应优先仅依据结构化复现步骤执行
+- 只有在执行过程中出现计划缺口、字段歧义、请求细节不完整或证据口径不清时，才允许按 `source_label` 有界回看文件版原始报告
 
 输出：
 
@@ -663,7 +671,7 @@ reproducer 最终结果必须至少包含：
 - 增加 replay / resume
 - 为 `/src` 结果增加专用 renderer
 
-## 15. 当前执行状态（2026-03-28）
+## 15. 当前执行状态（2026-03-30）
 
 ### 当前阶段
 
@@ -733,12 +741,48 @@ reproducer 最终结果必须至少包含：
 - 修改 `tests/interface/test_tui_src_dispatch.py`，补充裸 `/src` 与错误 `@file` 的交互回归测试
 - 已执行 `uv run pytest tests/interface/test_tui_src_dispatch.py tests/interface/test_slash_commands.py tests/interface/test_tui_tool_rendering.py -q`
 - 已再次执行 `uv run python -m compileall strix`
+- 修改 `strix/src_repro/orchestration.py`，将 analyzer / planner / reproducer 的宿主侧任务模板、阶段名和根级状态消息统一改为中文输出
+- 修改 `strix/agents/StrixAgent/strix_agent.py`，将 `/src` 编排失败、产物保存成功/失败等宿主侧消息统一改为中文
+- 修改 `strix/tools/src_repro/src_repro_actions.py`，将 `/src` 产物保存工具返回消息统一改为中文
+- 再次修改 `strix/skills/src_report/report_repro_analyzer.md`，强制 `reason` 与 `missing_info` 使用中文，并进一步收紧认证/登录态规则：仅凭历史抓包中的 JWT/Cookie/Authorization 不再视为可复现前提；未明确允许“测试者自备普通有效登录态”的认证页面/接口场景一律按阻塞处理
+- 修改 `tests/src_repro/test_orchestration.py` 与 `tests/skills/test_src_repro_skills.py`，补充针对中文编排输出和 analyzer 收紧规则的回归断言
+- 已执行 `uv run pytest tests/src_repro/test_orchestration.py tests/skills/test_src_repro_skills.py tests/tools/test_src_repro_actions.py -q`
+- 已再次执行 `uv run python -m compileall strix`
+- 再次修改 `strix/skills/src_report/report_repro_analyzer.md`，将认证前提进一步细分为：
+  - `ordinary_authenticated_session_required`
+  - `special_role_or_special_account_required`
+  - `specific_report_secret_required_now`
+- 调整 analyzer 联合判定规则：普通登录态需求不再自动视为阻塞；仅在“特殊角色/特殊账号/必须复用特定报告 secret”时才因认证前提缺失直接 `can_reproduce=false`
+- 修改 `strix/skills/src_report/report_to_repro_checklist.md`，允许 planner 在普通登录态场景下写出 `需要测试者自备普通有效登录态` 这类前置条件，而不是把历史 JWT/Cookie 当成执行输入
+- 修改 `tests/skills/test_src_repro_skills.py`，补充对上述认证分类与 planner 前置条件规则的回归断言
+- 已执行 `uv run pytest tests/skills/test_src_repro_skills.py tests/src_repro/test_orchestration.py -q`
+- 已再次执行 `uv run python -m compileall strix`
+- 再次修改 `strix/skills/src_report/report_to_repro_checklist.md`，将 `Detailed Reproduction Steps` 收紧为“原子步骤 + 具体动作/调用”格式，新增 `Suggested Action / Invocation`、`Required Inputs`、`Evidence Type`、`Stop / Failure Rule` 字段，并明确禁止把 UI 触发、抓包检查、响应查看合并成单一步骤
+- 修改 `tests/skills/test_src_repro_skills.py`，补充对 planner 新步骤字段、反合并规则和 `execute_js` 规划边界的回归断言
+- 再次修改 `strix/skills/src_report/repro_plan_executor.md`，将执行规则收紧到动作级：要求优先遵守 `Suggested Action / Invocation`，禁止用 `execute_js` 替代计划中的 `click/type/press_key/list_requests/view_request/repeat_request` 等动作，并补充浏览器触发流量后的抓包、看包、重放执行纪律
+- 修改 `tests/skills/test_src_repro_skills.py`，补充对 executor 动作级约束、反 `execute_js` 偏航规则和动作级执行轨迹字段的回归断言
+- 将 `/src` 复现相关 skill 全面中文化：`src_repro_root.md`、`report_repro_analyzer.md`、`report_to_repro_checklist.md`、`repro_plan_executor.md` 的说明、标题和规则文案统一改为中文，同时保留必要的结构化字段名、工具名和合同字段
+- 修改 `tests/skills/test_src_repro_skills.py`，将复现相关 skill 的字符串级断言同步切换为中文版本
+- 修改 `strix/interface/slash_commands.py`，新增 `/src run <report>` 与 `/src run @file` 子命令，允许显式跳过 analyzer 直接进入 planner -> reproducer
+- 修改 `strix/src_repro/contracts.py` 与 `strix/src_repro/orchestration.py`，为 `/src` 任务增加 `skip_analysis` 标记，并在跳过分析模式下注入“用户显式跳过分析”的合成 analysis 结果
+- 修改 `tests/interface/test_slash_commands.py`、`tests/interface/test_tui_src_dispatch.py`、`tests/src_repro/test_orchestration.py`，补充 `/src run` 的命令解析、TUI 路由和跳过 analyzer 编排回归
+- 修改 `strix/src_repro/orchestration.py`，调整 reproducer 阶段任务模板：默认不再下发原始漏洞报告正文，只下发 `reproduction_plan`、`analysis_json` 与 `original_report_source`（文件路径/目录/文件名）元信息
+- 修改 `strix/tools/src_repro/src_repro_actions.py` 与 `strix/tools/src_repro/src_repro_actions_schema.xml`，新增宿主侧 `load_src_report_source` 工具，允许 reproducer 仅在执行遇到真实信息缺口时按 `source_label` 有界回看文件版原始报告
+- 修改 `strix/tools/src_repro/__init__.py`，导出 `load_src_report_source`
+- 修改 `tests/tools/test_src_repro_actions.py` 与 `tests/src_repro/test_orchestration.py`，补充“reproducer 不再收到原始报告正文”以及“可按需读取文件版原始报告”的回归断言
+- 再次修改 `strix/skills/src_report/repro_plan_executor.md`，新增“默认只按 `reproduction_plan` 执行、不得开局通读原始报告、只有真实信息缺口时才允许优先使用 `load_src_report_source` 回看原报告”的执行纪律
+- 再次修改 `strix/skills/src_report/report_to_repro_checklist.md`，要求 planner 尽量把 URL、endpoint、HTTP 方法、字段名、payload、成功标志等执行关键字段直接保留在步骤文本中，减少 reproducer 对回看原始报告的依赖
+- 修改 `tests/skills/test_src_repro_skills.py`，补充对上述 planner / executor 新规则的字符串级回归断言
+- 已执行 `uv run pytest tests/src_repro/test_orchestration.py tests/tools/test_src_repro_actions.py tests/interface/test_slash_commands.py -q`
+- 已执行 `uv run pytest tests/skills/test_src_repro_skills.py tests/src_repro/test_orchestration.py tests/tools/test_src_repro_actions.py -q`
+- 已再次执行 `uv run python -m compileall strix`
 
 ### 当前未完成
 
 - 尚未执行手工 `/src @file` 路径验收
 - 尚未按“当前仓库源码宿主 + 远端 sandbox 镜像”模式完成一轮手工验收
 - 尚未补 `/src` 结果在 TUI 中的专用 renderer
+- 宿主层尚未对 reproducer 是否违规提前回看原始报告做硬校验；当前主要依赖 planner / executor skill 约束
 
 ### 当前阻塞与风险
 
@@ -746,8 +790,12 @@ reproducer 最终结果必须至少包含：
 - `/src` bundle 已落盘到 run 目录，但还没有专门的 UI 展示组件
 - 手工验收时容易把“宿主源码能力”和“sandbox 镜像能力”混淆；当前 `/src` 入口、编排、结果解析与落盘都在宿主 Python 代码，不在远端 sandbox 镜像内
 - 当前 Strix skill 机制仅支持加载单个 `.md` 技能文件，不支持像 `F:\Study\strix\Note\fx-skills` 那样按目录自动读取 `SKILL.md`、`references/`、`scripts/` 等技能包内容；这导致旧版 `fx-skills` 中的类型路由、混合场景联合判定、工具路由、脱敏规则、停止条件和证据 manifest 规则没有被当前 `/src` skills 继承
-- 上述 skill 机制差异已经实质影响当前 `/src` 行为；虽然已补第二轮通用抽象，但当前 analyzer 已从“偏宽”转为“偏保守”，会把“测试者自备普通有效登录态即可继续”的报告场景提前判成 `can_reproduce=false`
-- 当前 analyzer 仍缺少一层更细的认证前提分类：尚未明确区分“必须复用报告中的特定凭据”与“只需测试者自己具备普通有效登录态”这两类通用场景
+- 上述 skill 机制差异已经实质影响当前 `/src` 行为；虽然已补多轮通用抽象，当前 analyzer 仍需要继续通过真实报告回归来验证“普通登录态 / 特殊角色 / 特定 secret 复用”三类认证前提在不同漏洞类型下是否稳定
+- `/src` 宿主侧可见输出已统一改为中文，但仍需继续用真实报告回归确认 analyzer 子 agent 在长文本、混合 UI/API 报告中的最终 `reason` 不再漂移到英文
+- planner 虽已收紧为“具体动作/调用”格式，但宿主层仍未对 reproducer 的实际工具选择做硬校验；当前仍存在 child agent 在 API/代理验证场景下偏向 `browser_action(action="execute_js")` 的风险
+- executor 虽已收紧为动作级执行纪律，但当前仍然依赖 prompt 约束而非宿主层硬校验；若模型继续违背计划，下一步仍需在宿主侧增加 tool/action drift 检测
+- planner / executor 虽已分别收紧为“尽量把关键执行字段写进步骤”和“只有信息缺口时才回看原报告”，但当前仍缺少宿主层对“是否过早调用 `load_src_report_source`”的硬性审计
+- `/src run` 允许显式跳过 analyzer，这提升了人工强制执行能力，但也意味着低质量报告会更容易直接把时间消耗在 planner / reproducer 阶段；后续应在产物和 UI 中明确标记“analysis skipped”
 - `Note/` 目录仍是未跟踪状态，后续提交时需要继续避免误纳入
 
 ### 已完成验证
@@ -768,6 +816,10 @@ reproducer 最终结果必须至少包含：
 - 已通过 `tests/skills/test_src_repro_skills.py`
 - 已通过第二轮通用规则收紧后的 `tests/skills/test_src_repro_skills.py`
 - 已通过 `/src` 非法输入交互回归：`tests/interface/test_tui_src_dispatch.py`、`tests/interface/test_slash_commands.py`、`tests/interface/test_tui_tool_rendering.py`
+- 已通过中文编排输出与 analyzer 收紧回归：`tests/src_repro/test_orchestration.py`、`tests/skills/test_src_repro_skills.py`、`tests/tools/test_src_repro_actions.py`
+- 已通过普通登录态认证分类回归：`tests/skills/test_src_repro_skills.py`、`tests/src_repro/test_orchestration.py`
+- 已通过“reproducer 默认不收原始报告正文、按需回看原报告”回归：`tests/src_repro/test_orchestration.py`、`tests/tools/test_src_repro_actions.py`
+- 已通过 planner / executor 最新收紧规则回归：`tests/skills/test_src_repro_skills.py`
 - 已通过 `uv run python -m compileall strix`
 
 ### 建议下一步
@@ -775,4 +827,6 @@ reproducer 最终结果必须至少包含：
 - 先按 `plan/2026-03-27-strix-src-local-acceptance.md` 执行一次“当前仓库源码宿主 + 远端 sandbox 镜像”的手工验收
 - 视需要执行一次手工 `/src @file` 验收
 - 继续围绕 analyzer 的认证前提模型做下一轮收敛：将“必须复用报告中的特定凭据”和“测试者自备普通有效登录态即可”拆成不同的通用判定分支
+- 继续围绕 planner / executor / 宿主层三处收口：将“步骤建议”逐步升级为“可校验的动作级约束”，并考虑在宿主层识别 reproducer 的工具偏航
+- 继续围绕“原始报告回看”补宿主层收口：记录 reproducer 是否过早调用 `load_src_report_source`，并视需要把“只允许信息缺口时回看”升级为可审计或可拦截规则
 - 视需要增加 `/src` 结果专用 renderer

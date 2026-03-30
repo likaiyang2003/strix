@@ -153,8 +153,8 @@ class StrixAgent(BaseAgent):
             )
         except (RuntimeError, TimeoutError, ValueError) as exc:
             failure_message = (
-                f"/src orchestration failed for `{src_task.source_label}`.\n"
-                f"Reason: {exc}"
+                f"`/src` 编排失败，来源：`{src_task.source_label}`。\n"
+                f"原因：{exc}"
             )
             emit_message(failure_message)
             return {
@@ -173,11 +173,11 @@ class StrixAgent(BaseAgent):
             result["artifacts"] = persist_result
             output_dir = persist_result.get("output_dir")
             if isinstance(output_dir, str) and output_dir:
-                emit_message(f"/src artifacts saved to `{output_dir}`.")
+                emit_message(f"`/src` 产物已保存到 `{output_dir}`。")
         else:
             emit_message(
-                "/src artifacts were not persisted.\n"
-                f"Reason: {persist_result.get('message', 'unknown error')}"
+                "`/src` 产物保存失败。\n"
+                f"原因：{persist_result.get('message', 'unknown error')}"
             )
 
         return result
