@@ -143,6 +143,7 @@ class StrixAgent(BaseAgent):
             return None
 
         self.state.update_context("last_handled_src_repro_message", src_task.original_message)
+        self.state.update_context("last_src_repro_source_label", src_task.source_label)
         emit_message = lambda content: self._emit_src_repro_message(content, tracer)
 
         try:
@@ -215,7 +216,34 @@ class StrixAgent(BaseAgent):
                 f"Failed to create {stage_name}: {creation_result.get('error', 'unknown error')}"
             )
 
-        return await self._wait_for_src_repro_stage_summary(creation_result["agent_id"])
+        child_agent_id = str(creation_result["agent_id"])
+        self._configure_src_repro_stage_agent(child_agent_id, skill_name)
+
+        return await self._wait_for_src_repro_stage_summary(child_agent_id)
+
+    def _configure_src_repro_stage_agent(self, child_agent_id: str, skill_name: str) -> None:
+        from strix.tools.agents_graph.agents_graph_actions import _agent_graph, _agent_states
+
+        child_state = _agent_states.get(child_agent_id)
+        if child_state is None:
+            return
+
+        child_state.update_context("src_repro_mode", True)
+        child_state.update_context(
+            "src_repro_stage",
+            "reproducer" if skill_name == "repro_plan_executor" else "analyzer",
+        )
+        child_state.update_context(
+            "src_repro_source_label",
+            self.state.context.get("last_src_repro_source_label", "inline"),
+        )
+
+        if skill_name == "repro_plan_executor":
+            child_state.update_context("src_repro_plan_required", True)
+            child_state.update_context("src_repro_plan_created", False)
+
+        if child_agent_id in _agent_graph["nodes"]:
+            _agent_graph["nodes"][child_agent_id]["state"] = child_state.model_dump()
 
     async def _wait_for_src_repro_stage_summary(self, child_agent_id: str) -> str:
         from strix.tools.agents_graph.agents_graph_actions import (

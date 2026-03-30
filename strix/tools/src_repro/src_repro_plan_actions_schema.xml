@@ -1,0 +1,65 @@
+<tools>
+  <tool name="create_src_repro_plan">
+    <description>Create a dedicated `/src` reproduction step contract for the current reproducer agent.
+
+Use this instead of the generic todo tool when running a `/src` reproduction task. The created plan is private to the current agent and is intended to capture ordered, action-level reproduction steps with evidence expectations.</description>
+    <parameters>
+      <parameter name="steps" type="string" required="true">
+        <description>Ordered reproduction steps. Prefer a JSON array of step objects. Each step object should include at least `title`, and may include `objective`, `suggested_action`, `required_inputs`, `expected_evidence`, `evidence_type`, and `stop_rule`. A simple bullet list is also accepted for fallback.</description>
+      </parameter>
+      <parameter name="title" type="string" required="false">
+        <description>Human-readable title for the `/src` reproduction plan.</description>
+      </parameter>
+      <parameter name="source_label" type="string" required="false">
+        <description>Input source label such as `inline` or the referenced report path.</description>
+      </parameter>
+      <parameter name="replace" type="boolean" required="false">
+        <description>Replace the current plan if one already exists. Default is false.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Returns success, plan_id, full plan object, and a status summary for all steps.</description>
+    </returns>
+  </tool>
+
+  <tool name="get_src_repro_plan">
+    <description>Return the current `/src` reproduction plan for this agent, including all steps and summary counts.</description>
+    <parameters>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Returns success, plan_id, full plan object, and summary counts.</description>
+    </returns>
+  </tool>
+
+  <tool name="update_src_repro_plan_step">
+    <description>Update one or multiple `/src` reproduction steps for the current agent.
+
+Use this to mark the current step in progress, done, blocked, or skipped, and to store the actual action taken, observation, or evidence collected.</description>
+    <parameters>
+      <parameter name="step_id" type="string" required="false">
+        <description>Single step identifier such as `S1`.</description>
+      </parameter>
+      <parameter name="status" type="string" required="false">
+        <description>New status: `pending`, `in_progress`, `done`, `blocked`, or `skipped`.</description>
+      </parameter>
+      <parameter name="notes" type="string" required="false">
+        <description>Short execution note for the step.</description>
+      </parameter>
+      <parameter name="actual_action" type="string" required="false">
+        <description>The actual tool/action used while executing the step.</description>
+      </parameter>
+      <parameter name="actual_observation" type="string" required="false">
+        <description>The real observation or response seen while executing the step.</description>
+      </parameter>
+      <parameter name="actual_evidence" type="string" required="false">
+        <description>The concrete evidence captured for the step.</description>
+      </parameter>
+      <parameter name="updates" type="string" required="false">
+        <description>JSON array of step updates, each with `step_id` and optional `status`, `notes`, `actual_action`, `actual_observation`, and `actual_evidence`.</description>
+      </parameter>
+    </parameters>
+    <returns type="Dict[str, Any]">
+      <description>Returns success, updated step ids, full plan object, and summary counts.</description>
+    </returns>
+  </tool>
+</tools>

@@ -2,6 +2,7 @@ import asyncio
 
 from strix.src_repro import (
     build_reproducer_task,
+    extract_execution_todo,
     extract_summary_from_completion_report,
     parse_src_repro_task_message,
     run_src_repro_flow,
@@ -54,23 +55,41 @@ def test_extract_summary_from_completion_report_returns_summary_block() -> None:
     assert summary == '{"can_reproduce": true, "reason": "信息充分", "missing_info": []}'
 
 
-def test_build_reproducer_task_embeds_plan_and_report() -> None:
+def test_extract_execution_todo_returns_first_section() -> None:
+    execution_report = """## 1) Execution Todo
+- Open page
+- Replay request
+
+## 2) Reproduction Execution Notes
+- observed"""
+
+    todo = extract_execution_todo(execution_report)
+
+    assert todo.startswith("## 1) Execution Todo")
+    assert "Replay request" in todo
+    assert "Reproduction Execution Notes" not in todo
+
+
+def test_build_reproducer_task_embeds_report_text_only() -> None:
     task = SrcReproTask(
         report_text="report body",
         source_label=r"F:\Study\strix\Vul_report\demo-report.md",
     )
     analysis = SrcReproAnalysis(can_reproduce=True, reason="ok", missing_info=[])
 
-    rendered = build_reproducer_task(task, analysis, "Success Criteria\n- Success Marker: visible")
+    rendered = build_reproducer_task(task, analysis)
 
     assert "<src_repro_reproducer_task>" in rendered
-    assert "<reproduction_plan><![CDATA[" in rendered
-    assert "Success Criteria" in rendered
-    assert "report body" not in rendered
-    assert "<source_type>file</source_type>" in rendered
-    assert "<source_dir>F:\\Study\\strix\\Vul_report</source_dir>" in rendered
-    assert "<source_name>demo-report.md</source_name>" in rendered
-    assert "load_src_report_source" in rendered
+    assert "<report_text><![CDATA[" in rendered
+    assert "report body" in rendered
+    assert "## 1) Execution Todo" in rendered
+    assert "<analysis_json><![CDATA[" in rendered
+    assert "create_src_repro_plan" in rendered
+    assert "update_src_repro_plan_step" in rendered
+    assert "get_src_repro_plan" in rendered
+    assert "`todo`" in rendered
+    assert "<original_report_source>" not in rendered
+    assert "<reproduction_plan>" not in rendered
 
 
 def test_run_src_repro_flow_stops_after_analyzer_when_not_reproducible() -> None:
@@ -101,16 +120,17 @@ def test_run_src_repro_flow_stops_after_analyzer_when_not_reproducible() -> None
     )
 
     assert len(stage_calls) == 1
-    assert stage_calls[0][0] == "SRC 复现分析器"
+    assert stage_calls[0][0] == "SRC Repro Analyzer"
     assert result["analysis"]["can_reproduce"] is False
     assert result["reproduction_plan"] is None
     assert result["execution_report"] is None
     assert result["final_verdict"] == "not reproducible"
-    assert "开始 analyzer 阶段" in emitted_messages[0]
-    assert emitted_messages[-1].startswith("`/src` 预检查已结束")
+    assert "/src" in emitted_messages[0]
+    assert "analyzer" in emitted_messages[0]
+    assert "不可复现" in emitted_messages[-1]
 
 
-def test_run_src_repro_flow_runs_all_three_stages() -> None:
+def test_run_src_repro_flow_runs_analyzer_then_reproducer() -> None:
     stage_calls: list[tuple[str, str, str]] = []
     emitted_messages: list[str] = []
     raw_message = """<src_repro_task>
@@ -123,11 +143,20 @@ def test_run_src_repro_flow_runs_all_three_stages() -> None:
 
     async def fake_stage_runner(stage_name: str, skill_name: str, task_text: str) -> str:
         stage_calls.append((stage_name, skill_name, task_text))
-        if stage_name == "SRC 复现分析器":
+        if stage_name == "SRC Repro Analyzer":
             return '{"can_reproduce": true, "reason": "信息充分", "missing_info": []}'
-        if stage_name == "SRC 复现规划器":
-            return "## Detailed Reproduction Steps\n1. Open page\n## Success Criteria\n- Success Marker: leak"
-        return "## 4) Final Verdict\n- verdict: reproducible\n- reason: leak observed"
+        return (
+            "## 1) Execution Todo\n"
+            "- Open page\n"
+            "- Replay request\n\n"
+            "## 2) Reproduction Execution Notes\n"
+            "- observed request\n\n"
+            "## 3) Skills/MCP Execution Trace\n"
+            "- requested tool: send_request\n\n"
+            "## 4) Final Verdict\n"
+            "- verdict: reproducible\n"
+            "- reason: leak observed"
+        )
 
     result = asyncio.run(
         run_src_repro_flow(
@@ -138,14 +167,14 @@ def test_run_src_repro_flow_runs_all_three_stages() -> None:
     )
 
     assert [call[0] for call in stage_calls] == [
-        "SRC 复现分析器",
-        "SRC 复现规划器",
-        "SRC 复现执行器",
+        "SRC Repro Analyzer",
+        "SRC Reproducer",
     ]
     assert result["analysis"]["can_reproduce"] is True
-    assert result["reproduction_plan"].startswith("## Detailed Reproduction Steps")
+    assert result["reproduction_plan"].startswith("## 1) Execution Todo")
     assert result["final_verdict"] == "reproducible"
-    assert emitted_messages[-1].startswith("`/src` 执行已结束")
+    assert "reproducer" in emitted_messages[-2]
+    assert emitted_messages[-1].startswith("`/src`")
 
 
 def test_run_src_repro_flow_skips_analyzer_for_run_mode() -> None:
@@ -161,9 +190,17 @@ def test_run_src_repro_flow_skips_analyzer_for_run_mode() -> None:
 
     async def fake_stage_runner(stage_name: str, skill_name: str, task_text: str) -> str:
         stage_calls.append((stage_name, skill_name, task_text))
-        if stage_name == "SRC 复现规划器":
-            return "## Detailed Reproduction Steps\n1. Open page\n## Success Criteria\n- Success Marker: leak"
-        return "## 4) Final Verdict\n- verdict: blocked\n- reason: proxy blocked"
+        return (
+            "## 1) Execution Todo\n"
+            "- Open page\n\n"
+            "## 2) Reproduction Execution Notes\n"
+            "- proxy blocked\n\n"
+            "## 3) Skills/MCP Execution Trace\n"
+            "- requested tool: browser_action\n\n"
+            "## 4) Final Verdict\n"
+            "- verdict: blocked\n"
+            "- reason: proxy blocked"
+        )
 
     result = asyncio.run(
         run_src_repro_flow(
@@ -173,11 +210,8 @@ def test_run_src_repro_flow_skips_analyzer_for_run_mode() -> None:
         )
     )
 
-    assert [call[0] for call in stage_calls] == [
-        "SRC 复现规划器",
-        "SRC 复现执行器",
-    ]
+    assert [call[0] for call in stage_calls] == ["SRC Reproducer"]
     assert result["analysis"]["can_reproduce"] is True
-    assert result["analysis"]["reason"] == "用户显式要求跳过分析，直接生成复现步骤并执行。"
+    assert result["analysis"]["reason"] == "用户显式要求跳过分析，直接进入复现执行。"
     assert result["final_verdict"] == "blocked"
-    assert emitted_messages[0].startswith("已收到 `/src run` 任务")
+    assert "/src run" in emitted_messages[0]

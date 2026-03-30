@@ -93,3 +93,32 @@ def test_persist_src_repro_bundle_logs_tool_result(monkeypatch) -> None:
     assert tracer.starts[0][0] == "save_src_repro_bundle"
     assert tracer.updates[0][1] == "completed"
     assert "analysis_json" in persisted["echo"]
+
+
+def test_configure_src_repro_stage_agent_marks_reproducer_state() -> None:
+    agent = StrixAgent.__new__(StrixAgent)
+    agent.state = AgentState(agent_id="root-agent", agent_name="Root Agent", parent_id=None)
+    agent.state.update_context("last_src_repro_source_label", "inline")
+
+    child_state = AgentState(agent_id="child-agent", agent_name="SRC Reproducer", parent_id="root-agent")
+    graph = agents_graph_actions.__dict__["_agent_graph"]
+    states = agents_graph_actions.__dict__["_agent_states"]
+    original_nodes = dict(graph["nodes"])
+    original_states = dict(states)
+
+    try:
+        graph["nodes"]["child-agent"] = {"state": {}}
+        states["child-agent"] = child_state
+
+        agent._configure_src_repro_stage_agent("child-agent", "repro_plan_executor")
+
+        assert child_state.context["src_repro_stage"] == "reproducer"
+        assert child_state.context["src_repro_plan_required"] is True
+        assert child_state.context["src_repro_plan_created"] is False
+        assert child_state.context["src_repro_source_label"] == "inline"
+        assert graph["nodes"]["child-agent"]["state"]["context"]["src_repro_plan_required"] is True
+    finally:
+        graph["nodes"].clear()
+        graph["nodes"].update(original_nodes)
+        states.clear()
+        states.update(original_states)

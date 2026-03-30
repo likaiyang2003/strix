@@ -104,9 +104,15 @@ def _extract_verdict_label(final_verdict: str) -> str:
     lowered = final_verdict.lower()
     if "not reproducible" in lowered:
         return "not reproducible"
+    if "不可复现" in final_verdict:
+        return "not reproducible"
     if "reproducible" in lowered:
         return "reproducible"
+    if "可复现" in final_verdict:
+        return "reproducible"
     if "blocked" in lowered:
+        return "blocked"
+    if "阻塞" in final_verdict:
         return "blocked"
     return "unknown"
 

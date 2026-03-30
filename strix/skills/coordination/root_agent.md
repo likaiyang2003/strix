@@ -24,7 +24,7 @@ If the user message contains a structured mode block such as `<src_repro_task>` 
 When that happens:
 - Prioritize the loaded `/src` coordination skill over the generic recon-first guidance below
 - Do not default back to broad reconnaissance, generic scanning, or open-ended exploration
-- Follow the report-driven analyzer -> planner -> reproducer workflow for that mode
+- Follow the report-driven analyzer -> reproducer workflow for that mode
 
 ## Scope Decomposition
 

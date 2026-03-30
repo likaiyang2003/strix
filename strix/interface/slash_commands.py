@@ -89,9 +89,9 @@ def build_src_task_message(request: SrcCommandRequest) -> str:
     report_text_cdata = _wrap_cdata(request.report_text)
     analysis_mode = "skip" if request.skip_analysis else "full"
     workflow_text = (
-        "    用户显式要求跳过 analyzer，直接进入 planner 和 reproducer。\n"
+        "    用户显式要求跳过 analyzer，直接进入 reproducer。\n"
         if request.skip_analysis
-        else "    保持严格串行工作流：先 analyzer，再 planner，最后 reproducer。\n"
+        else "    保持严格串行工作流：先 analyzer，再 reproducer。\n"
     )
 
     return (
@@ -104,7 +104,7 @@ def build_src_task_message(request: SrcCommandRequest) -> str:
         "    Treat the following vulnerability report as a dedicated `/src` reproduction task.\n"
         "    Do not perform broad reconnaissance or generic vulnerability scanning.\n"
         f"{workflow_text}"
-        "    Keep analyzer, planner, and reproducer responsibilities separated.\n"
+        "    Keep analyzer and reproducer responsibilities separated.\n"
         "    Use the `src_repro_root` orchestration workflow for this task.\n"
         "  </instructions>\n"
         f"  <report_text><![CDATA[{report_text_cdata}]]></report_text>\n"
@@ -224,7 +224,6 @@ def _strip_wrapping_quotes(value: str) -> str:
 
 
 def _wrap_cdata(value: str) -> str:
-    # XML CDATA cannot contain the literal token "]]>".
     return value.replace("]]>", "]]]]><![CDATA[>")
 
 

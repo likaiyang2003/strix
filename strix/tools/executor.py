@@ -25,6 +25,37 @@ _SERVER_TIMEOUT = float(Config.get("strix_sandbox_execution_timeout") or "120")
 SANDBOX_EXECUTION_TIMEOUT = _SERVER_TIMEOUT + 30
 SANDBOX_CONNECT_TIMEOUT = float(Config.get("strix_sandbox_connect_timeout") or "10")
 
+SRC_REPRO_PLAN_TOOLS = {
+    "create_src_repro_plan",
+    "get_src_repro_plan",
+    "update_src_repro_plan_step",
+}
+SRC_REPRO_LEGACY_TODO_TOOLS = {
+    "create_todo",
+    "list_todos",
+    "update_todo",
+    "mark_todo_done",
+    "mark_todo_pending",
+    "delete_todo",
+}
+SRC_REPRO_EXECUTION_TOOLS = {
+    "browser_action",
+    "create_agent",
+    "list_requests",
+    "python_action",
+    "repeat_request",
+    "send_request",
+    "terminal_execute",
+    "view_request",
+}
+SRC_REPRO_ALWAYS_ALLOWED_TOOLS = {
+    "agent_finish",
+    "get_src_repro_plan",
+    "update_src_repro_plan_step",
+    "view_agent_graph",
+    "wait_for_message",
+}
+
 
 async def execute_tool(tool_name: str, agent_state: Any | None = None, **kwargs: Any) -> Any:
     execute_in_sandbox = should_execute_in_sandbox(tool_name)
@@ -115,6 +146,43 @@ async def _execute_tool_locally(tool_name: str, agent_state: Any | None, **kwarg
     return await result if inspect.isawaitable(result) else result
 
 
+def _validate_src_repro_tool_gate(tool_name: str, agent_state: Any | None) -> str | None:
+    if agent_state is None or not hasattr(agent_state, "context"):
+        return None
+
+    context = getattr(agent_state, "context", {})
+    if not isinstance(context, dict) or not context.get("src_repro_plan_required"):
+        return None
+
+    stage = str(context.get("src_repro_stage") or "").strip().lower()
+    if stage != "reproducer":
+        return None
+
+    if tool_name in SRC_REPRO_LEGACY_TODO_TOOLS:
+        return (
+            "在 `/src` reproducer 中禁止使用通用 todo 工具。"
+            "请改用 `create_src_repro_plan`、`get_src_repro_plan`、`update_src_repro_plan_step`。"
+        )
+
+    if tool_name == "create_agent":
+        return "在 `/src` reproducer 中禁止创建额外子 agent，请直接按当前步骤合同执行。"
+
+    plan_created = bool(context.get("src_repro_plan_created"))
+    if plan_created:
+        return None
+
+    if tool_name in SRC_REPRO_PLAN_TOOLS or tool_name in SRC_REPRO_ALWAYS_ALLOWED_TOOLS:
+        return None
+
+    if tool_name in SRC_REPRO_EXECUTION_TOOLS:
+        return (
+            "当前 `/src` reproducer 还没有创建步骤合同。"
+            "在调用执行型工具之前，必须先调用 `create_src_repro_plan`。"
+        )
+
+    return None
+
+
 def validate_tool_availability(tool_name: str | None) -> tuple[bool, str]:
     if tool_name is None:
         available = ", ".join(sorted(get_tool_names()))
@@ -170,6 +238,10 @@ async def execute_tool_with_validation(
         return f"Error: {error_msg}"
 
     assert tool_name is not None
+
+    src_repro_gate_error = _validate_src_repro_tool_gate(tool_name, agent_state)
+    if src_repro_gate_error:
+        return f"Error: {src_repro_gate_error}"
 
     arg_error = _validate_tool_arguments(tool_name, kwargs)
     if arg_error:

@@ -24,38 +24,46 @@ def test_load_skills_can_load_src_repro_root_and_src_report_skills() -> None:
     assert "report_repro_analyzer" in loaded
     assert "report_to_repro_checklist" in loaded
     assert "repro_plan_executor" in loaded
-    assert "报告驱动复现" in loaded["src_repro_root"]
-    assert '"can_reproduce"' in loaded["report_repro_analyzer"]
-    assert "historical_packet_evidence" in loaded["report_repro_analyzer"]
-    assert "post_exploitation_result" in loaded["report_repro_analyzer"]
-    assert "Authorization: bearer null" in loaded["report_repro_analyzer"]
-    assert "所有自然语言输出都必须使用中文" in loaded["report_repro_analyzer"]
-    assert "缺少可用的认证令牌或会话 cookie" in loaded["report_repro_analyzer"]
-    assert "缺少当前可用登录态获取方式" in loaded["report_repro_analyzer"]
-    assert "ordinary_authenticated_session_required" in loaded["report_repro_analyzer"]
-    assert "special_role_or_special_account_required" in loaded["report_repro_analyzer"]
-    assert "specific_report_secret_required_now" in loaded["report_repro_analyzer"]
-    assert "缺少一步一步的登录教程，本身不应直接视为阻塞" in loaded["report_repro_analyzer"]
-    assert "Replay-First 充分性" in loaded["report_repro_analyzer"]
-    assert "需要测试者自备普通有效登录态" in loaded["report_to_repro_checklist"]
-    assert "Detailed Reproduction Steps" in loaded["report_to_repro_checklist"]
-    assert "Suggested Action / Invocation" in loaded["report_to_repro_checklist"]
-    assert "Required Inputs" in loaded["report_to_repro_checklist"]
-    assert "Evidence Type" in loaded["report_to_repro_checklist"]
-    assert "Stop / Failure Rule" in loaded["report_to_repro_checklist"]
-    assert "historical_packet_evidence" in loaded["report_to_repro_checklist"]
-    assert "不得指导执行器使用 `report-provided jwt-token`" in loaded["report_to_repro_checklist"]
-    assert "不得写成类似 “发送消息并验证请求与响应” 的单一步骤" in loaded["report_to_repro_checklist"]
-    assert "不得把 `browser_action(action=\"execute_js\")` 作为默认规划动作" in loaded["report_to_repro_checklist"]
-    assert "planner 应尽量把执行当前步骤真正需要的关键字段直接保留在计划中" in loaded["report_to_repro_checklist"]
-    assert "最终输出结构" in loaded["repro_plan_executor"]
-    assert "决定性验证规则" in loaded["repro_plan_executor"]
-    assert "中间层或合成错误不能当作目标侧证据" in loaded["repro_plan_executor"]
-    assert "Suggested Action / Invocation" in loaded["repro_plan_executor"]
-    assert "每一步都应被视为一个有界合同" in loaded["repro_plan_executor"]
-    assert "不得静默替换成同一工具族中的其他动作" in loaded["repro_plan_executor"]
-    assert "浏览器 DOM 中存在 payload，并不能替代一个计划中的“请求检查”或“重放检查”步骤" in loaded["repro_plan_executor"]
-    assert "连续两次或以上探索性 `execute_js` 调用" in loaded["repro_plan_executor"]
-    assert "如果你因为计划约束而拒绝使用 `execute_js`" in loaded["repro_plan_executor"]
-    assert "不得在开局阶段重新通读原始漏洞报告" in loaded["repro_plan_executor"]
-    assert "必须优先使用 `load_src_report_source`" in loaded["repro_plan_executor"]
+
+    root_skill = loaded["src_repro_root"]
+    assert "analyzer -> reproducer" in root_skill
+    assert "使用 `report_text` 作为执行输入" in root_skill
+    assert "`report_to_repro_checklist` 仍可作为独立 skill 保留" in root_skill
+
+    analyzer_skill = loaded["report_repro_analyzer"]
+    assert '"can_reproduce"' in analyzer_skill
+    assert "historical_packet_evidence" in analyzer_skill
+    assert "post_exploitation_result" in analyzer_skill
+    assert "Authorization: bearer null" in analyzer_skill
+    assert "ordinary_authenticated_session_required" in analyzer_skill
+    assert "special_role_or_special_account_required" in analyzer_skill
+    assert "specific_report_secret_required_now" in analyzer_skill
+
+    planner_skill = loaded["report_to_repro_checklist"]
+    assert "需要测试者自备普通有效登录态" in planner_skill
+    assert "Detailed Reproduction Steps" in planner_skill
+    assert "Suggested Action / Invocation" in planner_skill
+    assert "Required Inputs" in planner_skill
+    assert "Evidence Type" in planner_skill
+    assert "Stop / Failure Rule" in planner_skill
+    assert "historical_packet_evidence" in planner_skill
+    assert "不得指导执行器使用 `report-provided jwt-token`" in planner_skill
+    assert "不得写成类似 “发送消息并验证请求与响应” 的单一步骤" in planner_skill
+    assert "不得把 `browser_action(action=\"execute_js\")` 作为默认规划动作" in planner_skill
+    assert "planner 应尽量把执行当前步骤真正需要的关键字段直接保留在计划中" in planner_skill
+    assert "不得把执行器设计成依赖二次回看原始报告" in planner_skill
+
+    executor_skill = loaded["repro_plan_executor"]
+    assert "你不是 analyzer，也不是 planner" in executor_skill
+    assert "## 1) Execution Todo" in executor_skill
+    assert "先创建一份简短、原子化、可执行的 `/src` 专用步骤合同" in executor_skill
+    assert "你必须先调用 `create_src_repro_plan`" in executor_skill
+    assert "`create_src_repro_plan` 成功返回后" in executor_skill
+    assert "`send_request`" in executor_skill
+    assert "`update_src_repro_plan_step`" in executor_skill
+    assert "`get_src_repro_plan`" in executor_skill
+    assert "不得在 `/src` reproducer 中使用通用 `todo` 工具" in executor_skill
+    assert "`browser_action(action=\"execute_js\")` 边界" in executor_skill
+    assert "不得在执行过程中二次回看文件版原始报告" in executor_skill
+    assert "不得创建任何“缺口解析”子 agent" in executor_skill
+    assert "如果决定性验证步骤从未真正完成，不能判 `not reproducible`，只能判 `blocked`" in executor_skill

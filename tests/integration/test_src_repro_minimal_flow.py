@@ -39,15 +39,14 @@ def test_src_repro_minimal_flow_persists_bundle(monkeypatch, tmp_path: Path) -> 
     }
 
     analyzer_summary = '{"can_reproduce": true, "reason": "Enough details", "missing_info": []}'
-    planner_summary = (
-        "## Detailed Reproduction Steps\n"
-        "1. Open the page\n"
-        "## Success Criteria\n"
-        "- Success Marker: admin data is visible"
-    )
     reproducer_summary = (
-        "## 1) Plan Coverage\n"
-        "- Step 1: success\n"
+        "## 1) Execution Todo\n"
+        "- Open the page\n"
+        "- Replay the request\n\n"
+        "## 2) Reproduction Execution Notes\n"
+        "- observed admin data\n\n"
+        "## 3) Skills/MCP Execution Trace\n"
+        "- requested tool: send_request\n\n"
         "## 4) Final Verdict\n"
         "- verdict: reproducible\n"
         "- reason: admin data observed"
@@ -67,8 +66,6 @@ def test_src_repro_minimal_flow_persists_bundle(monkeypatch, tmp_path: Path) -> 
 
         if name == "SRC Repro Analyzer":
             summary = analyzer_summary
-        elif name == "SRC Repro Planner":
-            summary = planner_summary
         else:
             summary = reproducer_summary
 
@@ -114,7 +111,6 @@ def test_src_repro_minimal_flow_persists_bundle(monkeypatch, tmp_path: Path) -> 
     assert result["final_verdict"] == "reproducible"
     assert [call[0] for call in stage_calls] == [
         "SRC Repro Analyzer",
-        "SRC Repro Planner",
         "SRC Reproducer",
     ]
     assert all(call[2] is False for call in stage_calls)
@@ -134,9 +130,7 @@ def test_src_repro_minimal_flow_persists_bundle(monkeypatch, tmp_path: Path) -> 
         "reason": "Enough details",
         "missing_info": [],
     }
-    assert "Detailed Reproduction Steps" in (output_dir / "02_reproduction_plan.txt").read_text(
-        encoding="utf-8"
-    )
+    assert "Execution Todo" in (output_dir / "02_reproduction_plan.txt").read_text(encoding="utf-8")
     assert "verdict: reproducible" in (output_dir / "03_execution_trace.md").read_text(
         encoding="utf-8"
     )
@@ -145,7 +139,7 @@ def test_src_repro_minimal_flow_persists_bundle(monkeypatch, tmp_path: Path) -> 
         for exec_data in tracer.tool_executions.values()
     )
     assert any(
-        "artifacts saved" in str(message.get("content", ""))
+        str(output_dir) in str(message.get("content", ""))
         for message in agent.state.get_conversation_history()
         if message.get("role") == "assistant"
     )

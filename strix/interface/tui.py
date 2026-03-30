@@ -6,6 +6,7 @@ import signal
 import sys
 import threading
 from collections.abc import Callable
+from copy import deepcopy
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -738,6 +739,7 @@ class StrixTUIApp(App):  # type: ignore[misc]
 
         self._streaming_render_cache: dict[str, tuple[int, Any]] = {}
         self._last_streaming_len: dict[str, int] = {}
+        self._src_repro_status_signature: str | None = None
 
         self._scan_thread: threading.Thread | None = None
         self._scan_stop_event = threading.Event()
@@ -855,9 +857,23 @@ class StrixTUIApp(App):  # type: ignore[misc]
             stats_display = Static("", id="stats_display")
             stats_scroll = VerticalScroll(stats_display, id="stats_scroll")
 
+            src_repro_status_display = Static("", id="src_repro_status_display")
+            src_repro_status_display.ALLOW_SELECT = False
+            src_repro_status_scroll = VerticalScroll(
+                src_repro_status_display,
+                id="src_repro_status_scroll",
+                classes="hidden",
+            )
+
             vulnerabilities_panel = VulnerabilitiesPanel(id="vulnerabilities_panel")
 
-            sidebar = Vertical(agents_tree, vulnerabilities_panel, stats_scroll, id="sidebar")
+            sidebar = Vertical(
+                agents_tree,
+                src_repro_status_scroll,
+                vulnerabilities_panel,
+                stats_scroll,
+                id="sidebar",
+            )
 
             content_container.mount(chat_area_container)
             content_container.mount(sidebar)
@@ -980,6 +996,8 @@ class StrixTUIApp(App):  # type: ignore[misc]
         self._update_chat_view()
 
         self._update_agent_status_display()
+
+        self._update_src_repro_status_panel()
 
         self._update_stats_display()
 
@@ -1409,6 +1427,286 @@ class StrixTUIApp(App):  # type: ignore[misc]
         self._safe_widget_operation(vuln_panel.remove_class, "hidden")
         vuln_panel.update_vulnerabilities(enriched_vulns)
 
+    @staticmethod
+    def _build_src_repro_summary(steps: list[dict[str, Any]]) -> dict[str, int]:
+        summary = {
+            "total": len(steps),
+            "pending": 0,
+            "in_progress": 0,
+            "done": 0,
+            "blocked": 0,
+            "skipped": 0,
+        }
+
+        for step in steps:
+            status = str(step.get("status") or "pending").strip().lower()
+            if status not in summary:
+                summary[status] = 0
+            summary[status] += 1
+        return summary
+
+    @staticmethod
+    def _truncate_src_repro_status_text(value: str, limit: int = 68) -> str:
+        if len(value) <= limit:
+            return value
+        return value[: limit - 3].rstrip() + "..."
+
+    @staticmethod
+    def _upsert_src_repro_plan_step(plan: dict[str, Any], step_snapshot: dict[str, Any]) -> None:
+        steps = plan.setdefault("steps", [])
+        if not isinstance(steps, list):
+            steps = []
+            plan["steps"] = steps
+
+        step_id = str(step_snapshot.get("step_id") or "").strip()
+        if not step_id:
+            return
+
+        copied_step = deepcopy(step_snapshot)
+        for index, existing in enumerate(steps):
+            if str(existing.get("step_id") or "").strip() == step_id:
+                steps[index] = copied_step
+                break
+        else:
+            steps.append(copied_step)
+
+        steps.sort(
+            key=lambda item: (
+                int(item.get("order") or 10_000),
+                str(item.get("step_id") or ""),
+            )
+        )
+
+    def _collect_src_repro_plan_snapshots(
+        self,
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, int]]:
+        plan_snapshots: dict[str, dict[str, Any]] = {}
+        latest_exec_ids: dict[str, int] = {}
+
+        for exec_id in sorted(self.tracer.tool_executions):
+            tool_data = self.tracer.tool_executions[exec_id]
+            tool_name = str(tool_data.get("tool_name") or "")
+            if tool_name not in {
+                "create_src_repro_plan",
+                "get_src_repro_plan",
+                "update_src_repro_plan_step",
+            }:
+                continue
+
+            agent_id = str(tool_data.get("agent_id") or "").strip()
+            if not agent_id:
+                continue
+
+            result = tool_data.get("result")
+            if not isinstance(result, dict):
+                continue
+
+            if tool_name in {"create_src_repro_plan", "get_src_repro_plan"}:
+                plan = result.get("plan")
+                if isinstance(plan, dict):
+                    plan_snapshots[agent_id] = deepcopy(plan)
+                    latest_exec_ids[agent_id] = exec_id
+                continue
+
+            updated_steps = result.get("updated_steps")
+            if not isinstance(updated_steps, list) or not updated_steps:
+                continue
+
+            plan_state = plan_snapshots.setdefault(
+                agent_id,
+                {
+                    "plan_id": str(result.get("plan_id") or ""),
+                    "title": str(result.get("title") or "SRC Repro Plan"),
+                    "source_label": str(result.get("source_label") or ""),
+                    "updated_at": str(
+                        result.get("plan_updated_at")
+                        or tool_data.get("completed_at")
+                        or tool_data.get("timestamp")
+                        or ""
+                    ),
+                    "steps": [],
+                },
+            )
+
+            title = str(result.get("title") or "").strip()
+            if title:
+                plan_state["title"] = title
+
+            source_label = str(result.get("source_label") or "").strip()
+            if source_label:
+                plan_state["source_label"] = source_label
+
+            updated_at = str(
+                result.get("plan_updated_at")
+                or tool_data.get("completed_at")
+                or tool_data.get("timestamp")
+                or ""
+            ).strip()
+            if updated_at:
+                plan_state["updated_at"] = updated_at
+
+            for step in updated_steps:
+                if isinstance(step, dict):
+                    self._upsert_src_repro_plan_step(plan_state, step)
+
+            latest_exec_ids[agent_id] = exec_id
+
+        return plan_snapshots, latest_exec_ids
+
+    def _is_descendant_agent(self, candidate_agent_id: str, ancestor_agent_id: str) -> bool:
+        current_agent_id = candidate_agent_id
+        while current_agent_id:
+            agent_data = self.tracer.agents.get(current_agent_id, {})
+            parent_id = str(agent_data.get("parent_id") or "").strip()
+            if not parent_id:
+                return False
+            if parent_id == ancestor_agent_id:
+                return True
+            current_agent_id = parent_id
+        return False
+
+    def _select_src_repro_status_agent(
+        self,
+        plan_snapshots: dict[str, dict[str, Any]],
+        latest_exec_ids: dict[str, int],
+    ) -> str | None:
+        if not plan_snapshots:
+            return None
+
+        if self.selected_agent_id:
+            if self.selected_agent_id in plan_snapshots:
+                return self.selected_agent_id
+
+            descendant_candidates = [
+                agent_id
+                for agent_id in plan_snapshots
+                if self._is_descendant_agent(agent_id, self.selected_agent_id)
+            ]
+            if descendant_candidates:
+                return max(
+                    descendant_candidates,
+                    key=lambda agent_id: latest_exec_ids.get(agent_id, 0),
+                )
+
+        return max(plan_snapshots, key=lambda agent_id: latest_exec_ids.get(agent_id, 0))
+
+    @staticmethod
+    def _build_src_repro_status_content(agent_name: str, plan: dict[str, Any]) -> Text:
+        text = Text()
+        text.append("SRC 状态", style="bold #22c55e")
+
+        title = str(plan.get("title") or "SRC Repro Plan").strip() or "SRC Repro Plan"
+        source_label = str(plan.get("source_label") or "").strip()
+        steps = plan.get("steps")
+        normalized_steps = [step for step in steps if isinstance(step, dict)] if isinstance(steps, list) else []
+        summary = StrixTUIApp._build_src_repro_summary(normalized_steps)
+
+        text.append("\n  ")
+        text.append(title, style="bold")
+        if agent_name:
+            text.append("\n  ")
+            text.append(agent_name, style="dim")
+        if source_label:
+            text.append("\n  ")
+            text.append(source_label, style="dim")
+
+        text.append("\n  ")
+        text.append(
+            (
+                f"共 {summary['total']} 步 · "
+                f"进行中 {summary['in_progress']} · "
+                f"完成 {summary['done']} · "
+                f"阻塞 {summary['blocked']}"
+            ),
+            style="dim",
+        )
+
+        if not normalized_steps:
+            text.append("\n  ")
+            text.append("暂无步骤状态", style="dim")
+            return text
+
+        status_markers = {
+            "pending": "[ ]",
+            "in_progress": "[~]",
+            "done": "[✓]",
+            "blocked": "[!]",
+            "skipped": "[-]",
+        }
+
+        for step in normalized_steps[:8]:
+            status = str(step.get("status") or "pending").strip().lower()
+            marker = status_markers.get(status, "[ ]")
+            step_id = str(step.get("step_id") or "?").strip() or "?"
+            step_title = str(step.get("title") or "(untitled)").strip() or "(untitled)"
+
+            title_style: str | None = None
+            if status == "done":
+                title_style = "dim strike"
+            elif status == "in_progress":
+                title_style = "bold"
+            elif status == "blocked":
+                title_style = "#f59e0b"
+
+            text.append("\n  ")
+            text.append(marker)
+            text.append(" ")
+            text.append(f"{step_id} ", style="bold")
+            text.append(step_title, style=title_style)
+
+            detail_label = ""
+            detail_value = ""
+            for label, key in [
+                ("观察", "actual_observation"),
+                ("备注", "notes"),
+                ("证据", "actual_evidence"),
+                ("预期", "expected_evidence"),
+            ]:
+                candidate = str(step.get(key) or "").strip()
+                if candidate:
+                    detail_label = label
+                    detail_value = StrixTUIApp._truncate_src_repro_status_text(candidate)
+                    break
+
+            if detail_value:
+                text.append("\n    ")
+                text.append(detail_label, style="dim")
+                text.append(": ")
+                text.append(detail_value, style="dim")
+
+        return text
+
+    def _update_src_repro_status_panel(self) -> None:
+        try:
+            status_scroll = self.query_one("#src_repro_status_scroll", VerticalScroll)
+            status_display = self.query_one("#src_repro_status_display", Static)
+        except (ValueError, Exception):
+            return
+
+        if not self._is_widget_safe(status_scroll) or not self._is_widget_safe(status_display):
+            return
+
+        plan_snapshots, latest_exec_ids = self._collect_src_repro_plan_snapshots()
+        target_agent_id = self._select_src_repro_status_agent(plan_snapshots, latest_exec_ids)
+
+        if target_agent_id is None:
+            self._src_repro_status_signature = None
+            self._safe_widget_operation(status_scroll.add_class, "hidden")
+            self._safe_widget_operation(status_display.update, Text())
+            return
+
+        plan = plan_snapshots[target_agent_id]
+        content = self._build_src_repro_status_content(
+            self._get_agent_name(target_agent_id),
+            plan,
+        )
+        signature = f"{target_agent_id}:{content.plain}"
+        if signature != self._src_repro_status_signature:
+            self._safe_widget_operation(status_display.update, content)
+            self._src_repro_status_signature = signature
+
+        self._safe_widget_operation(status_scroll.remove_class, "hidden")
+
     def _get_agent_name_for_vulnerability(self, report_id: str) -> str | None:
         """Find the agent name that created a vulnerability report."""
         for _exec_id, tool_data in list(self.tracer.tool_executions.items()):
@@ -1561,6 +1859,7 @@ class StrixTUIApp(App):  # type: ignore[misc]
 
         self.call_later(self._update_chat_view)
         self._update_agent_status_display()
+        self._update_src_repro_status_panel()
 
     def _start_scan_thread(self) -> None:
         def scan_target() -> None:

@@ -4,16 +4,19 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import asdict
-from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape
 
 from .contracts import SrcReproAnalysis, SrcReproTask
-from .prompt_budget import trim_for_analysis, trim_for_plan, trim_plan_for_reproduction
+from .prompt_budget import trim_for_analysis, trim_for_reproduction
 from .result_parser import parse_analysis
 
-
 _SUMMARY_PATTERN = re.compile(r"<summary>([\s\S]*?)</summary>", re.IGNORECASE)
+_EXECUTION_TODO_PATTERN = re.compile(
+    r"(##\s*1\)\s*Execution Todo[\s\S]*?)(?=\n##\s*\d+\)|\Z)",
+    re.IGNORECASE,
+)
+_VERDICT_LINE_PATTERN = re.compile(r"^\s*-\s*verdict\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
 
 def parse_src_repro_task_message(message: str) -> SrcReproTask | None:
@@ -70,69 +73,42 @@ def build_analyzer_task(task: SrcReproTask) -> str:
         "<src_repro_analyzer_task>\n"
         f"  <source_label>{source_label}</source_label>\n"
         "  <instructions>\n"
-        "    只分析该报告当前是否具备可复现条件。\n"
+        "    只分析该报告当前是否具备可复现前提。\n"
         "    所有自然语言输出必须使用中文。\n"
         "    只返回严格 JSON，然后调用 agent_finish，并将该 JSON 放入 result_summary。\n"
-        "    不要执行、不要规划、不要扩大范围。\n"
+        "    不要执行，不要规划，不要扩展范围。\n"
         "  </instructions>\n"
         f"  <report_text><![CDATA[{report_text}]]></report_text>\n"
         "</src_repro_analyzer_task>"
     )
 
 
-def build_planner_task(task: SrcReproTask, analysis: SrcReproAnalysis) -> str:
-    report_text = _wrap_cdata(trim_for_plan(task.report_text))
+def build_reproducer_task(task: SrcReproTask, analysis: SrcReproAnalysis) -> str:
     analysis_json = _wrap_cdata(json.dumps(asdict(analysis), ensure_ascii=False, indent=2))
+    report_text = _wrap_cdata(trim_for_reproduction(task.report_text))
     source_label = escape(task.source_label)
-    return (
-        "<src_repro_planner_task>\n"
-        f"  <source_label>{source_label}</source_label>\n"
-        "  <instructions>\n"
-        "    将报告转换为结构化复现清单。\n"
-        "    所有自然语言输出必须使用中文。\n"
-        "    必须遵守 analyzer 结论，不要重新判断可复现性。\n"
-        "    将完整清单放入 agent_finish.result_summary。\n"
-        "  </instructions>\n"
-        f"  <analysis_json><![CDATA[{analysis_json}]]></analysis_json>\n"
-        f"  <report_text><![CDATA[{report_text}]]></report_text>\n"
-        "</src_repro_planner_task>"
-    )
-
-
-def build_reproducer_task(task: SrcReproTask, analysis: SrcReproAnalysis, plan: str) -> str:
-    analysis_json = _wrap_cdata(json.dumps(asdict(analysis), ensure_ascii=False, indent=2))
-    plan_text = _wrap_cdata(trim_plan_for_reproduction(plan))
-    source_label = escape(task.source_label)
-    source_meta = _describe_report_source(task.source_label)
-    source_type = escape(source_meta["source_type"])
-    source_path = escape(source_meta["source_path"])
-    source_dir = escape(source_meta["source_dir"])
-    source_name = escape(source_meta["source_name"])
-    source_available = str(source_meta["source_available"]).lower()
     return (
         "<src_repro_reproducer_task>\n"
         f"  <source_label>{source_label}</source_label>\n"
-        "  <original_report_source>\n"
-        f"    <source_type>{source_type}</source_type>\n"
-        f"    <source_available>{source_available}</source_available>\n"
-        f"    <source_path>{source_path}</source_path>\n"
-        f"    <source_dir>{source_dir}</source_dir>\n"
-        f"    <source_name>{source_name}</source_name>\n"
-        "  </original_report_source>\n"
         "  <instructions>\n"
-        "    严格按提供的复现计划执行。\n"
+        "    你是 `/src` 复现执行器。\n"
+        "    必须尊重 analyzer 结论，但不要重新判断 can_reproduce。\n"
+        "    先阅读 report_text，并且必须先调用 `create_src_repro_plan` 创建一份简短、原子化、可执行的 `/src` 专用步骤合同。\n"
+        "    在 `create_src_repro_plan` 完成之前，不得先调用 `send_request`、`repeat_request`、`list_requests`、`view_request`、`browser_action`、`python_action` 或 `terminal_execute`。\n"
+        "    然后严格按这份步骤合同执行，并基于真实执行结果给出最终 verdict。\n"
         "    所有自然语言输出必须使用中文。\n"
-        "    需要时使用现有 browser、proxy、terminal、python 工具。\n"
-        "    默认只依赖 reproduction_plan 执行，不要把自己重新退回到原始漏洞报告驱动模式。\n"
-        "    不要重写或重设计计划。\n"
-        "    如果当前来源是文件，并且你在执行中遇到计划缺口、字段歧义、请求细节不完整、证据口径不清等问题，"
-        "先查看 original_report_source 中给出的源报告目录和文件名，再调用 load_src_report_source 按 source_label 读取原始报告补充信息。\n"
-        "    只有在执行确实遇到问题时，才允许按需查看原始报告；不要在一开始就重复通读原始报告。\n"
-        "    如果来源是 inline，则说明没有可回看的文件版原始报告。\n"
-        "    将完整执行报告放入 agent_finish.result_summary。\n"
+        "    不得 broad recon，不得扩展攻击面，不得把任务改造成通用扫描。\n"
+        "    执行过程中应使用 `get_src_repro_plan` 或 `update_src_repro_plan_step` 维护步骤状态，而不是只在自然语言里口头描述计划。\n"
+        "    在 `/src` reproducer 中不得使用通用 `todo` 工具。\n"
+        "    必须把完整执行报告写入 agent_finish.result_summary。\n"
+        "    输出必须按以下四个部分组织：\n"
+        "    1. `## 1) Execution Todo`\n"
+        "    2. `## 2) Reproduction Execution Notes`\n"
+        "    3. `## 3) Skills/MCP Execution Trace`\n"
+        "    4. `## 4) Final Verdict`\n"
         "  </instructions>\n"
         f"  <analysis_json><![CDATA[{analysis_json}]]></analysis_json>\n"
-        f"  <reproduction_plan><![CDATA[{plan_text}]]></reproduction_plan>\n"
+        f"  <report_text><![CDATA[{report_text}]]></report_text>\n"
         "</src_repro_reproducer_task>"
     )
 
@@ -148,16 +124,18 @@ async def run_src_repro_flow(
         raise ValueError("Invalid /src task message")
 
     if task.skip_analysis:
-        emit_message(f"已收到 `/src run` 任务，来源：`{task.source_label}`。跳过 analyzer，直接进入 planner 阶段。")
+        emit_message(
+            f"已收到 `/src run` 任务，来源：`{task.source_label}`。跳过 analyzer，直接进入 reproducer 阶段。"
+        )
         analysis = SrcReproAnalysis(
             can_reproduce=True,
-            reason="用户显式要求跳过分析，直接生成复现步骤并执行。",
+            reason="用户显式要求跳过分析，直接进入复现执行。",
             missing_info=[],
         )
     else:
         emit_message(f"已收到 `/src` 任务，来源：`{task.source_label}`。开始 analyzer 阶段。")
         analyzer_summary = await run_stage(
-            "SRC 复现分析器",
+            "SRC Repro Analyzer",
             "report_repro_analyzer",
             build_analyzer_task(task),
         )
@@ -180,18 +158,13 @@ async def run_src_repro_flow(
                 "final_summary": final_message,
             }
 
-    emit_message("analyzer 通过，开始 planner 阶段。")
-    reproduction_plan = await run_stage(
-        "SRC 复现规划器",
-        "report_to_repro_checklist",
-        build_planner_task(task, analysis),
-    )
-    emit_message("planner 已完成，开始 reproducer 阶段。")
+    emit_message("开始 reproducer 阶段。")
     execution_report = await run_stage(
-        "SRC 复现执行器",
+        "SRC Reproducer",
         "repro_plan_executor",
-        build_reproducer_task(task, analysis, reproduction_plan),
+        build_reproducer_task(task, analysis),
     )
+    reproduction_plan = extract_execution_todo(execution_report)
 
     final_message = _build_execution_summary_message(task, analysis, execution_report)
     emit_message(final_message)
@@ -206,19 +179,39 @@ async def run_src_repro_flow(
     }
 
 
+def extract_execution_todo(execution_report: str) -> str:
+    if not isinstance(execution_report, str):
+        return ""
+
+    match = _EXECUTION_TODO_PATTERN.search(execution_report.strip())
+    if not match:
+        return ""
+
+    return match.group(1).strip()
+
+
 def _infer_final_verdict(execution_report: str) -> str:
+    if not isinstance(execution_report, str):
+        return "unknown"
+
+    match = _VERDICT_LINE_PATTERN.search(execution_report)
+    if match:
+        verdict = match.group(1).strip().lower()
+        if verdict in {"reproducible", "not reproducible", "blocked"}:
+            return verdict
+
     lowered = execution_report.lower()
-    if "verdict" in lowered and "reproducible" in lowered and "not reproducible" not in lowered:
-        return "reproducible"
-    if "verdict" in lowered and "blocked" in lowered:
-        return "blocked"
     if "not reproducible" in lowered:
         return "not reproducible"
+    if "reproducible" in lowered:
+        return "reproducible"
+    if "blocked" in lowered:
+        return "blocked"
     return "unknown"
 
 
 def _build_precheck_stop_message(task: SrcReproTask, analysis: SrcReproAnalysis) -> str:
-    missing_info = "，".join(analysis.missing_info) if analysis.missing_info else "无"
+    missing_info = "；".join(analysis.missing_info) if analysis.missing_info else "无"
     return (
         f"`/src` 预检查已结束，来源：`{task.source_label}`。\n"
         "结果：不可复现。\n"
@@ -241,7 +234,7 @@ def _build_execution_summary_message(
     }.get(final_verdict, final_verdict)
     return (
         f"`/src` 执行已结束，来源：`{task.source_label}`。\n"
-        f"analyzer 原因：{analysis.reason}\n"
+        f"analyzer 结论：{analysis.reason}\n"
         f"最终结论：{verdict_label}"
     )
 
@@ -250,31 +243,10 @@ def _wrap_cdata(value: str) -> str:
     return value.replace("]]>", "]]]]><![CDATA[>")
 
 
-def _describe_report_source(source_label: str) -> dict[str, str | bool]:
-    normalized = (source_label or "").strip()
-    if not normalized or normalized == "inline":
-        return {
-            "source_type": "inline",
-            "source_available": False,
-            "source_path": "inline",
-            "source_dir": "",
-            "source_name": "",
-        }
-
-    source_path = Path(normalized)
-    return {
-        "source_type": "file",
-        "source_available": True,
-        "source_path": str(source_path),
-        "source_dir": str(source_path.parent),
-        "source_name": source_path.name,
-    }
-
-
 __all__ = [
     "build_analyzer_task",
-    "build_planner_task",
     "build_reproducer_task",
+    "extract_execution_todo",
     "extract_summary_from_completion_report",
     "parse_src_repro_task_message",
     "run_src_repro_flow",

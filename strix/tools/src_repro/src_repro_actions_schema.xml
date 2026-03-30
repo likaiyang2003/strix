@@ -1,32 +1,9 @@
 <tools>
-  <tool name="load_src_report_source">
-    <description>Read the original file-backed `/src` vulnerability report from the host side when execution hits ambiguity or missing detail.
-
-Use this only as an on-demand fallback during reproduction, not as the default planning input.
-If the current `/src` task came from inline text, this tool will report that no file-backed source is available.</description>
-    <parameters>
-      <parameter name="source_label" type="string" required="true">
-        <description>The original `/src` source label. For file-backed reports this is the absolute report path provided by the host.</description>
-      </parameter>
-      <parameter name="max_chars" type="integer" required="false">
-        <description>Maximum number of characters to return from the original report. Defaults to 12000.</description>
-      </parameter>
-    </parameters>
-    <returns type="Dict[str, Any]">
-      <description>Response containing: success, message, source_path, source_dir, source_name, content, truncated, total_chars, and returned_chars.</description>
-    </returns>
-    <examples>
-  <function=load_src_report_source>
-  <parameter=source_label>F:\Study\strix\Vul_report\demo-report.md</parameter>
-  <parameter=max_chars>6000</parameter>
-  </function>
-    </examples>
-  </tool>
   <tool name="save_src_repro_bundle">
     <description>Persist a `/src` reproduction bundle into the current Strix run directory.
 
-Use this after analyzer/planner/reproducer stages complete, or after `/src` precheck stops early.
-The bundle is stored under `strix_runs/&lt;run_name&gt;/src_repro/&lt;bundle_id&gt;/` with source report, analysis, plan, execution trace, final verdict, and manifest.</description>
+Use this after analyzer/reproducer stages complete, or after `/src` precheck stops early.
+The bundle is stored under `strix_runs/&lt;run_name&gt;/src_repro/&lt;bundle_id&gt;/` with source report, analysis, `/src` reproduction plan snapshot, execution trace, final verdict, and manifest.</description>
     <parameters>
       <parameter name="source_report" type="string" required="true">
         <description>The original plain-text vulnerability report used for `/src` reproduction.</description>
@@ -35,7 +12,7 @@ The bundle is stored under `strix_runs/&lt;run_name&gt;/src_repro/&lt;bundle_id&
         <description>Analyzer output as JSON string when available. If plain text is provided, the tool will store a normalized form.</description>
       </parameter>
       <parameter name="reproduction_plan" type="string" required="false">
-        <description>Structured planner output for the reproduction steps.</description>
+        <description>Reproducer-generated `/src` reproduction plan or step summary written to `02_reproduction_plan.txt` for compatibility.</description>
       </parameter>
       <parameter name="execution_trace" type="string" required="false">
         <description>Reproducer execution notes or full execution report.</description>
@@ -57,8 +34,8 @@ The bundle is stored under `strix_runs/&lt;run_name&gt;/src_repro/&lt;bundle_id&
   <function=save_src_repro_bundle>
   <parameter=source_report>target=https://demo.local path=/admin</parameter>
   <parameter=analysis_json>{"can_reproduce": true, "reason": "Enough details", "missing_info": []}</parameter>
-  <parameter=reproduction_plan>## Detailed Reproduction Steps
-1. Open the page</parameter>
+  <parameter=reproduction_plan>## 1) Execution Todo
+- Open the page</parameter>
   <parameter=execution_trace>## 4) Final Verdict
 - verdict: reproducible</parameter>
   <parameter=final_verdict>/src execution finished. Final verdict: reproducible</parameter>

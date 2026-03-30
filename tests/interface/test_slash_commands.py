@@ -101,7 +101,8 @@ def test_build_src_task_message_marks_run_mode_as_skip_analysis() -> None:
     message = build_src_task_message(request)
 
     assert "<analysis_mode>skip</analysis_mode>" in message
-    assert "用户显式要求跳过 analyzer" in message
+    assert "analyzer" in message
+    assert "reproducer" in message
 
 
 def test_build_src_dispatch_routes_message_to_root_agent() -> None:

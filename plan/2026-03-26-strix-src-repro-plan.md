@@ -1,229 +1,143 @@
-# Strix `/src` 二开实施计划
+# Strix `/src` 复现计划
 
-## 1. 目标
+更新时间：2026-03-31
 
-在当前 Strix 项目中新增一个 `/src` 交互命令，用于对公司内部的纯文本 SRC 漏洞报告执行定向复现。
+## 1. 当前正式架构
 
-本次二开只集成“后置复现链路”，不集成旧项目中的文档解析、图片提取、OCR、占位符回填、DOCX 重建等前置流程。
+当前 `/src` 主流程已经收口为：
 
-最终目标流程：
+- `/src`：`analyzer -> reproducer`
+- `/src run`：直接 `reproducer`
 
-1. 用户在 TUI 中输入 `/src <纯文本报告>` 或 `/src @<file>`
-2. 宿主层解析命令，得到 `report_text`
-3. 宿主层将任务路由给 root agent
-4. root agent 自动加载 `/src` 专用编排 skill
-5. root agent 串行创建 analyzer 子 agent
-6. analyzer 输出 `can_reproduce`、`reason`、`missing_info`
-7. 若不可复现，root agent 结束并落盘结果
-8. 若可复现，root agent 创建 planner 子 agent
-9. planner 输出结构化复现步骤
-10. root agent 创建 reproducer 子 agent
-11. reproducer 使用 Strix 现有 browser/proxy/terminal/python 能力执行复现
-12. root agent 汇总计划、执行日志、最终 verdict，并保存产物
+其中 reproducer 的职责是：
+
+1. 读取当前下发的原始漏洞报告文本
+2. 先创建 `/src` 专用步骤合同
+3. 再按步骤合同执行
+4. 最后输出 verdict
+
+以下旧方案已不再属于当前实现：
+
+- `planner` 作为 `/src` 主阶段
+- “缺口解析子 agent”
+- `load_src_report_source` 原始报告回看工具
 
 ## 2. 范围边界
 
-### 2.1 本次要做
+### 当前支持
 
-- TUI 新增 `/src` 命令入口
-- 支持直接传文本和 `@file` 文件引用
-- 为 `/src` 模式增加宿主侧命令分流
-- 为 `/src` 模式增加 root orchestration skill
-- 增加 analyzer / planner / reproducer 三类业务 skill
-- 增加最小化的 `/src` 结果落盘能力
-- 增加必要的单元测试与集成测试
+- 纯文本漏洞报告
+- TUI 中的 `/src <text>`
+- TUI 中的 `/src @file`
+- `/src run <text>`
+- `/src run @file`
+- `@file` 相对路径按“当前工作目录 -> `Vul_report/` 目录”顺序解析
+- TUI 中对 `/src @` 与 `/src run @` 提供 `Vul_report/` 文件建议
+- 当仅存在唯一匹配时，支持用 Tab 自动补全 `@file`
 
-### 2.2 本次不做
+### 当前不做
 
-- 不支持 DOCX / HTML 原始报告直接输入
-- 不集成旧项目的 parser / OCR / rebuild 逻辑
-- 不引入 LangGraph
-- 不引入旧项目的 OpenCode client
-- 不优先生成 DOCX 报告
-- 不改动 Strix 默认扫描主流程
+- DOCX / HTML 原始报告解析
+- OCR / 图片提取
+- 原始报告二次回看
+- 缺口解析子 agent
+- 默认 broad recon / 默认扫描主链路
 
-## 3. 总体设计
+## 3. 当前实现流程
 
-### 3.1 设计原则
+### 3.1 宿主入口
 
-- `/src` 是 Strix 的一种“专用交互模式”，不是新的独立 CLI 程序
-- Strix 保持执行引擎角色，旧项目只迁移“复现业务规则”
-- 业务规则通过 skill 和宿主侧 orchestration 表达，不新增第二套 agent runtime
-- root agent 负责编排，子 agent 负责单职责执行
-- `/src` 模式严格禁止默认 recon / scan 行为，必须是“报告驱动复现”
+宿主层负责：
 
-### 3.2 核心架构
-
-- 宿主层：
-  - 解析 `/src`
-  - 读取文件内容
-  - 定位 root agent
-  - 给 root agent 注入 `/src` 编排上下文
-- Root agent：
-  - 按固定顺序调度 analyzer -> planner -> reproducer
-  - 不自己做大段执行
-  - 负责最终汇总和调用落盘工具
-- Analyzer：
-  - 只判断“是否可复现”
-- Planner：
-  - 只输出结构化复现步骤
-- Reproducer：
-  - 只按步骤执行，不重新设计计划
-  - 默认不重新读取原始报告；仅在执行遇到真实信息缺口时，按源信息有界回看文件版原报告
-- 宿主落盘：
-  - 保存源报告、分析结果、复现计划、最终结论、执行痕迹摘要
-
-## 4. 与旧项目的映射关系
-
-### 4.1 保留逻辑
-
-来自 `Src_verify_Dev` 的可迁移核心：
-
-- `analysis_service.py`
-  - 解析 analyzer 返回的 JSON
-  - fallback 推断逻辑
-- `reproduce_service.py`
-  - prompt 结构
-  - 计划生成与执行阶段的职责分离
-- `prompt_budget.py`
-  - 长文本裁剪逻辑
-- `opencode-skills/*`
-  - analyzer / planner / reproducer 三类业务规则
-- `verdict-rules.md`
-  - reproducer 的最终结论规则
-
-### 4.2 不迁逻辑
-
-- `parser_service.py`
-- `node_parse.py`
-- `node_ocr.py`
-- `rebuild_service.py`
-- `OpenCodeClient`
-- `LangGraph graph.py`
-
-## 5. 文件改动清单
-
-### 5.1 需要修改的现有文件
-
-#### `strix/interface/tui.py`
-
-新增职责：
-
-- 在 `_send_user_message()` 中识别 `/src`
-- 将 `/src` 转给专门的 slash command handler
-- `/src` 强制路由到 root agent，而非当前选中 agent
-- 在 Help 文案中增加 `/src` 的说明
-
-建议改动点：
-
-- `HelpScreen.compose()`
-- `StrixTUIApp._send_user_message()`
-- 视情况补一个 `_handle_slash_command()` 私有方法
-
-#### `strix/tools/agents_graph/agents_graph_actions.py`
-
-新增职责：
-
-- 提供宿主侧辅助函数定位 root agent
-- 提供宿主侧安全访问 agent instance 的方法
-
-建议新增非 tool 函数：
-
-- `get_root_agent_id() -> str | None`
-- `get_agent_instance(agent_id: str) -> Any | None`
-
-#### `strix/tools/__init__.py`
-
-新增职责：
-
-- 导入新的 `src_repro` 工具模块
-
-### 5.2 需要新增的文件
-
-#### `strix/interface/slash_commands.py`
-
-职责：
-
-- 解析 slash command
-- 目前先只实现 `/src`
+- 解析 `/src` 与 `/src run`
 - 读取 `@file`
-- 构造标准化 `report_text`
-- 检查输入合法性
-- 定位 root agent
-- 将 `/src` 任务注入 root agent
+- 为相对 `@file` 自动补 `Vul_report/` 目录解析
+- 在 TUI 中为 `/src @` / `/src run @` 提供文件提示与唯一匹配补全
+- 对裸 `/src`、空 `run`、缺失文件等非法输入显式报错
+- 组装 `<src_repro_task>`
+- 为 root agent 自动加载 `src_repro_root`
+- 路由到 root agent
 
-建议函数：
+相关文件：
 
-- `is_slash_command(message: str) -> bool`
-- `parse_src_command(message: str, cwd: Path) -> SrcReproRequest`
-- `dispatch_src_command(app: Any, message: str) -> dict[str, Any]`
-- `_resolve_report_text(argument: str, cwd: Path) -> str`
-- `_build_src_instruction(report_text: str, source_label: str | None) -> str`
+- [slash_commands.py](/F:/Study/strix/strix/interface/slash_commands.py)
 
-#### `strix/src_repro/contracts.py`
+### 3.2 Analyzer
 
-职责：
+Analyzer 只负责输出：
 
-- 定义 `/src` 域的轻量数据契约
+- `can_reproduce`
+- `reason`
+- `missing_info`
 
-建议数据结构：
+补充说明：
 
-- `SrcReproRequest`
-  - `report_text`
-  - `source_label`
-  - `created_at`
-- `SrcReproAnalysis`
-  - `can_reproduce`
-  - `reason`
-  - `missing_info`
-- `SrcReproBundle`
-  - `source_report`
-  - `analysis`
-  - `reproduction_plan`
-  - `execution_trace`
-  - `final_verdict`
-  - `artifacts`
+- `/src run` 模式不会真正调用 analyzer
+- 但编排层仍会生成一份“跳过分析”的结构化 analysis 结果，供后续执行与落盘统一使用
 
-#### `strix/src_repro/prompt_budget.py`
+它不负责：
 
-职责：
+- 生成复现步骤
+- 执行漏洞
+- 扩展攻击范围
 
-- 从旧项目迁移长文本裁剪逻辑
-- 只保留纯文本报告相关函数
+相关文件：
 
-建议函数：
+- [report_repro_analyzer.md](/F:/Study/strix/strix/skills/src_report/report_repro_analyzer.md)
+- [orchestration.py](/F:/Study/strix/strix/src_repro/orchestration.py)
 
-- `trim_for_analysis()`
-- `trim_for_plan()`
-- `trim_for_reproduction()`
-- `build_budgeted_prompt()`
+### 3.3 Reproducer
 
-#### `strix/src_repro/result_parser.py`
+Reproducer 直接读取 `report_text` 执行，不再接收 planner 产物。
 
-职责：
+当前要求它：
 
-- 解析 analyzer 返回内容
-- 支持 JSON 优先、文本 fallback
+- 必须先调用 `create_src_repro_plan`
+- 在 `create_src_repro_plan` 完成前，不得先调用执行型工具
+- 执行中使用 `get_src_repro_plan` / `update_src_repro_plan_step` 维护状态
+- 在 `/src` reproducer 中禁止使用通用 `todo` 工具
+- 最终按 4 个部分输出：
+  - `## 1) Execution Todo`
+  - `## 2) Reproduction Execution Notes`
+  - `## 3) Skills/MCP Execution Trace`
+  - `## 4) Final Verdict`
 
-建议函数：
+相关文件：
 
-- `parse_analysis(raw_text: str) -> SrcReproAnalysis`
-- `_infer_can_reproduce()`
-- `_infer_reason()`
-- `_infer_missing_info()`
+- [src_repro_root.md](/F:/Study/strix/strix/skills/coordination/src_repro_root.md)
+- [repro_plan_executor.md](/F:/Study/strix/strix/skills/src_report/repro_plan_executor.md)
+- [orchestration.py](/F:/Study/strix/strix/src_repro/orchestration.py)
 
-#### `strix/src_repro/output.py`
+### 3.4 TUI 展示与 `/src` 步骤状态
 
-职责：
+当前 TUI 已对 `/src` 步骤工具做单独展示收口：
 
-- 负责 `/src` 结果落盘
-- 产物统一落到当前 run 目录下
+- `create_src_repro_plan`
+  - 首次在左侧聊天区全量展示步骤合同
+- `get_src_repro_plan`
+  - 左侧仅展示简版快照，不再默认铺开完整步骤细节
+- `update_src_repro_plan_step`
+  - 改为增量返回
+  - 左侧仅展示本次更新到的步骤与简短汇总
 
-建议输出目录：
+右侧 sidebar 已新增 `SRC 状态` 面板：
 
-- `strix_runs/<run_name>/src_repro/<bundle_id>/`
+- 优先显示当前选中 agent 的 `/src` 步骤状态
+- 如果当前选中的是 root，而真实步骤合同跑在其子级 reproducer 上，则自动回退显示最近的 `/src` reproducer 状态
+- 右侧内容来自 tracer 中的 `/src` 计划工具结果重建，而不是解析左侧聊天文本
 
-建议文件：
+相关文件：
+
+- [src_repro_plan_actions.py](/F:/Study/strix/strix/tools/src_repro/src_repro_plan_actions.py)
+- [src_repro_plan_renderer.py](/F:/Study/strix/strix/interface/tool_components/src_repro_plan_renderer.py)
+- [tui.py](/F:/Study/strix/strix/interface/tui.py)
+- [tui_styles.tcss](/F:/Study/strix/strix/interface/assets/tui_styles.tcss)
+
+### 3.5 落盘
+
+`/src` 产物统一写入当前 run 目录下的 `src_repro/<bundle_id>/`。
+
+当前产物包括：
 
 - `00_source_report.txt`
 - `01_analysis.json`
@@ -232,601 +146,223 @@
 - `04_final_verdict.md`
 - `manifest.json`
 
-建议函数：
+说明：
 
-- `save_src_repro_bundle(tracer: Any, bundle: SrcReproBundle) -> dict[str, str]`
-- `_get_src_repro_dir(tracer: Any, bundle_id: str) -> Path`
+- `02_reproduction_plan.txt` 当前保存的是 reproducer 自己生成的 `/src` 步骤合同摘要
+- 该命名保留是为了兼容现有落盘结构，并不代表当前仍有 planner 阶段
 
-#### `strix/tools/src_repro/__init__.py`
+相关文件：
 
-职责：
+- [output.py](/F:/Study/strix/strix/src_repro/output.py)
+- [src_repro_actions.py](/F:/Study/strix/strix/tools/src_repro/src_repro_actions.py)
+- [src_repro_actions_schema.xml](/F:/Study/strix/strix/tools/src_repro/src_repro_actions_schema.xml)
 
-- 工具模块初始化导出
+## 4. 当前代码映射
 
-#### `strix/tools/src_repro/src_repro_actions.py`
+### 主入口与编排
 
-职责：
+- [slash_commands.py](/F:/Study/strix/strix/interface/slash_commands.py)
+- [strix_agent.py](/F:/Study/strix/strix/agents/StrixAgent/strix_agent.py)
+- [orchestration.py](/F:/Study/strix/strix/src_repro/orchestration.py)
 
-- 提供 root agent 在流程结束时调用的持久化工具
+### Skills
 
-建议工具：
-
-- `save_src_repro_bundle(...)`
-
-入参建议：
-
-- `source_report`
-- `analysis_json`
-- `reproduction_plan`
-- `execution_trace`
-- `final_verdict`
-- `source_label`
-
-#### `strix/tools/src_repro/src_repro_actions_schema.xml`
-
-职责：
-
-- 给上面工具定义 XML schema
-
-#### `strix/skills/coordination/src_repro_root.md`
-
-职责：
-
-- `/src` 模式的 root 编排规则
-
-必须约束：
-
-- 不做 recon
-- 不做默认 scan
-- 仅围绕输入报告执行复现
-- 必须串行创建 analyzer / planner / reproducer
-- 必须在结束前调用 `save_src_repro_bundle`
-
-#### `strix/skills/src_report/report_repro_analyzer.md`
-
-职责：
-
-- 纯文本报告的可复现性分析
-
-必须约束：
-
-- 输出严格 JSON
-- 仅输出 `can_reproduce`、`reason`、`missing_info`
-
-#### `strix/skills/src_report/report_to_repro_checklist.md`
-
-职责：
-
-- 从报告中提取复现步骤
-
-必须约束：
-
-- 不重新判断可复现性
-- 只做“报告 -> 结构化步骤”
-
-#### `strix/skills/src_report/repro_plan_executor.md`
-
-职责：
-
-- 严格按计划执行
-
-必须约束：
-
-- 不重写计划
-- 每步都要记录执行状态
-- 最终 verdict 只能是
-  - `reproducible`
-  - `not reproducible`
-  - `blocked`
-
-### 5.3 可选新增文件
-
-#### `strix/interface/tool_components/src_repro_renderer.py`
-
-职责：
-
-- 优化 `save_src_repro_bundle` 工具在 TUI 中的显示效果
-
-不是第一阶段必须项。
-
-## 6. 运行时调用链设计
-
-### 6.1 宿主层调用链
-
-1. 用户在 TUI 输入 `/src ...`
-2. `tui.py` 识别 slash command
-3. `slash_commands.py` 解析命令
-4. 读取文件或内联文本，得到 `report_text`
-5. 宿主层找到 root agent
-6. 宿主层取消 root agent 当前执行
-7. 宿主层向 root agent 发送一个结构化用户消息
-
-建议注入消息模板：
-
-```text
-<src_repro_task>
-  <mode>src_reproduction</mode>
-  <source_label>...</source_label>
-  <instructions>
-    Treat the following vulnerability report as the only source of truth.
-    Do not perform broad reconnaissance.
-    First analyze reproducibility, then plan, then execute.
-  </instructions>
-  <report_text>
-  ...
-  </report_text>
-</src_repro_task>
-```
-
-### 6.2 Root agent 调度链
-
-1. root agent 识别到 `src_reproduction` 任务
-2. root agent 加载 `src_repro_root`
-3. root agent 创建 analyzer agent
-4. analyzer 完成后，root agent 接收 JSON 结果
-5. 若 `can_reproduce=false`
-  - root agent 直接汇总并调用 `save_src_repro_bundle`
-6. 若 `can_reproduce=true`
-  - root agent 创建 planner agent
-  - planner 完成后回传复现计划
-  - root agent 创建 reproducer agent
-  - reproducer 按计划执行
-  - root agent 收集执行结果与 verdict
-7. root agent 调用 `save_src_repro_bundle`
-8. root agent 进入 waiting 状态
-
-## 7. 各 agent 的职责合同
-
-### 7.1 Root agent
-
-只负责：
-
-- 分阶段调度
-- 决策分支
-- 结果汇总
-- 最终落盘
-
-禁止：
-
-- 自己长时间进行浏览器和代理执行
-- 跳过 analyzer 或 planner 直接进入执行
-
-### 7.2 Analyzer agent
-
-输入：
-
-- 纯文本漏洞报告
-
-输出：
-
-- 严格 JSON
-
-禁止：
-
-- 输出泛泛安全建议
-- 擅自生成复现步骤
-
-### 7.3 Planner agent
-
-输入：
-
-- 纯文本漏洞报告
-- analyzer 结论
-
-输出：
-
-- 结构化复现步骤
-
-禁止：
-
-- 重新判断可复现性
-- 直接执行
-
-### 7.4 Reproducer agent
-
-输入：
-
-- 复现计划
-- analysis 摘要
-- 原始报告源信息（文件路径/目录/文件名）
+- [src_repro_root.md](/F:/Study/strix/strix/skills/coordination/src_repro_root.md)
+- [report_repro_analyzer.md](/F:/Study/strix/strix/skills/src_report/report_repro_analyzer.md)
+- [repro_plan_executor.md](/F:/Study/strix/strix/skills/src_report/repro_plan_executor.md)
+- [report_to_repro_checklist.md](/F:/Study/strix/strix/skills/src_report/report_to_repro_checklist.md)
 
 说明：
 
-- 默认不向 reproducer 直接下发原始报告正文
-- reproducer 应优先仅依据结构化复现步骤执行
-- 只有在执行过程中出现计划缺口、字段歧义、请求细节不完整或证据口径不清时，才允许按 `source_label` 有界回看文件版原始报告
+- `report_to_repro_checklist` 仍保留为独立 skill
+- 它不再属于 `/src` 主执行链路
 
-输出：
+### `/src` 专用工具
 
-- 执行笔记
-- 工具轨迹
-- final verdict
+- [src_repro_actions.py](/F:/Study/strix/strix/tools/src_repro/src_repro_actions.py)
+- [src_repro_plan_actions.py](/F:/Study/strix/strix/tools/src_repro/src_repro_plan_actions.py)
 
-禁止：
+当前包含：
 
-- 自己扩展攻击范围
-- 不按计划擅自增加新的利用链
+- `create_src_repro_plan`
+- `get_src_repro_plan`
+- `update_src_repro_plan_step`
+- `save_src_repro_bundle`
 
-## 8. 数据与产物约定
+### `/src` 专用 renderer
 
-### 8.1 analysis 结果格式
+- [src_repro_plan_renderer.py](/F:/Study/strix/strix/interface/tool_components/src_repro_plan_renderer.py)
+- [tui.py](/F:/Study/strix/strix/interface/tui.py)
+- [tui_styles.tcss](/F:/Study/strix/strix/interface/assets/tui_styles.tcss)
 
-要求 analyzer 最终输出可被 `result_parser.py` 稳定解析：
+## 5. 当前已完成项
 
-```json
-{
-  "can_reproduce": true,
-  "reason": "报告已包含关键复现信息",
-  "missing_info": []
-}
+### 已完成能力
+
+- `/src` 与 `/src run` 命令解析
+- `@file` 输入支持
+- 相对 `@file` 自动解析 `Vul_report/` 目录
+- `/src @` / `/src run @` 文件建议与唯一匹配补全
+- `/src` 非法输入显式报错与交互收口
+- root agent 路由
+- analyzer -> reproducer 两阶段编排
+- `/src run` 跳过 analyzer
+- `/src` 专用步骤工具已接入
+- `/src` 专用 renderer 已接入
+- `create_src_repro_plan` 首次全量展示已收口
+- `update_src_repro_plan_step` 已改为增量返回
+- `get_src_repro_plan` 左侧已改为简版快照展示
+- 右侧 sidebar 已新增 `SRC 状态` 简版步骤状态区
+- 宿主层已只对 `/src` reproducer 强制 `src_repro_plan`
+- `/src` reproducer 已禁止使用通用 `todo`
+- `/src` 结果落盘
+- `/src` 相关最小回归测试
+- 原始报告回看链路移除
+- 缺口解析子 agent 链路移除
+
+### 已通过验证
+
+以下回归已通过：
+
+- [test_slash_commands.py](/F:/Study/strix/tests/interface/test_slash_commands.py)
+- [test_orchestration.py](/F:/Study/strix/tests/src_repro/test_orchestration.py)
+- [test_src_repro_minimal_flow.py](/F:/Study/strix/tests/integration/test_src_repro_minimal_flow.py)
+- [test_strix_src_repro_runtime.py](/F:/Study/strix/tests/agents/test_strix_src_repro_runtime.py)
+- [test_src_repro_skills.py](/F:/Study/strix/tests/skills/test_src_repro_skills.py)
+- [test_src_repro_actions.py](/F:/Study/strix/tests/tools/test_src_repro_actions.py)
+- [test_src_repro_plan_actions.py](/F:/Study/strix/tests/tools/test_src_repro_plan_actions.py)
+- [test_executor_src_repro_gate.py](/F:/Study/strix/tests/tools/test_executor_src_repro_gate.py)
+- [test_src_repro_plan_renderer.py](/F:/Study/strix/tests/interface/test_src_repro_plan_renderer.py)
+- [test_output.py](/F:/Study/strix/tests/src_repro/test_output.py)
+
+已执行命令：
+
+```powershell
+uv run pytest tests/interface/test_slash_commands.py tests/src_repro/test_orchestration.py tests/integration/test_src_repro_minimal_flow.py tests/agents/test_strix_src_repro_runtime.py tests/skills/test_src_repro_skills.py tests/tools/test_src_repro_actions.py tests/src_repro/test_output.py -q
+uv run python -m compileall strix
+uv run pytest tests/skills/test_src_repro_skills.py tests/src_repro/test_orchestration.py -q
+uv run pytest tests/tools/test_src_repro_plan_actions.py tests/interface/test_src_repro_plan_renderer.py -q
+uv run pytest tests/src_repro/test_orchestration.py tests/agents/test_strix_src_repro_runtime.py tests/integration/test_src_repro_minimal_flow.py -q
+uv run python -m compileall strix\tools\src_repro\src_repro_plan_actions.py strix\interface\tool_components\src_repro_plan_renderer.py strix\interface\tui.py
 ```
 
-### 8.2 final verdict 结果格式
+## 6. 当前未收口项
 
-reproducer 最终结果必须至少包含：
+### 6.1 Analyzer 仍可能过严
 
-- `Plan Coverage`
-- `Reproduction Execution Notes`
-- `Skills/MCP Execution Trace`
-- `Final Verdict`
+当前 analyzer 在“普通登录态即可继续尝试”的场景下，仍可能误判为：
 
-其中 `Final Verdict` 只能是：
+- 缺少可用认证令牌
+- 缺少当前登录态获取方式
+- `can_reproduce=false`
 
-- `reproducible`
-- `not reproducible`
-- `blocked`
+典型受影响案例：
 
-## 9. 详细实施阶段
+- 普通用户会话下的存储型 XSS
+- 普通登录态业务功能中的逻辑漏洞
+- 报告提供了完整 endpoint / payload / success marker，但历史 JWT/Cookie 只是证据而不是当前必需输入
 
-### Phase 1：命令入口与最小骨架（已完成）
+这部分仍需继续收紧 [report_repro_analyzer.md](/F:/Study/strix/strix/skills/src_report/report_repro_analyzer.md)。
 
-目标：
+### 6.2 左侧聊天区仍有较多过程性文本
 
-- `/src` 命令能在 TUI 中被识别和路由
+虽然当前计划卡片本身已经收口：
 
-任务：
+- `create` 不再重复刷屏
+- `update` 不再整份回显 plan
+- 右侧 `SRC 状态` 已承担实时状态职责
 
-- 新增 `slash_commands.py`
-- 改 `tui.py` 的 `_send_user_message()`
-- 增加 help 文案
-- 增加 root agent 定位 helper
+但左侧聊天区当前仍可能出现较多过程性自然语言，例如：
 
-验收：
+- `<think>...</think>` 块
+- “我现在准备执行 S2”
+- 对同一步骤的口头重复说明
 
-- 输入 `/src hello`
-- 宿主不会把消息发给当前子 agent
-- 而是正确发给 root agent
+这说明当前左侧空间的主要占用，已经从“计划工具结果过大”转移为“模型自身过程性输出过多”。
 
-### Phase 2：skill 与 agent 编排
+后续若继续做 TUI 体验收口，优先级应放在：
 
-目标：
+- 隐藏或过滤 `<think>` 展示
+- 收紧 reproducer 技能文案，减少口头复述
+- 视需要在 UI 层进一步压缩过程性 assistant 文本
 
-- root agent 能按 analyzer -> planner -> reproducer 顺序工作
+### 6.3 `/src` 步骤合同仍主要是“工具级 + prompt 级”组合约束
 
-任务：
+虽然当前已经落地：
 
-- 新增 `src_repro_root.md`
-- 新增 analyzer / planner / reproducer 三个 skill
-- 验证 root agent 能创建三个子 agent
+- 先 `create_src_repro_plan`
+- 再执行
+- 执行中维护步骤状态
+- 宿主层阻止 `/src` reproducer 在建 plan 之前直接调用执行型工具
+- 宿主层阻止 `/src` reproducer 使用通用 `todo`
 
-验收：
+但当前仍未做到的部分是：
 
-- analyzer 的 JSON 能被稳定收回
-- planner 的步骤能被稳定收回
-- reproducer 能被正确创建
+- 宿主层还没有校验 `agent_finish` 之前是否一定已经创建了 plan
+- 宿主层还没有校验最终 `## 1) Execution Todo` 是否与实际 plan 完全一致
+- 宿主层还没有从工具结果反推“步骤覆盖率”并自动校对最终 verdict
 
-### Phase 3：结果解析与 prompt budget
+### 6.4 `/src` 计划工具当前仍是全局注册
 
-目标：
+当前 `create_src_repro_plan` / `get_src_repro_plan` / `update_src_repro_plan_step`：
 
-- 长报告可稳定处理
-- analyzer 结果可容错解析
+- 已通过执行流和 skill 约束，逻辑上只服务于 `/src` reproducer
+- 宿主层也已对 `/src` reproducer 增加 plan-before-execute 限制
 
-任务：
+但从工具注册与 system prompt 下发层面看：
 
-- 迁 `prompt_budget.py`
-- 迁 `result_parser.py`
-- 在 `/src` 命令里对报告文本做裁剪
+- 这 3 个工具当前仍是全局注册
+- 会进入全局工具列表
+- 并非真正只对 `/src` reproducer 可见
 
-验收：
+当前还没有做到：
 
-- 超长报告输入时不至于直接压爆上下文
-- analyzer 返回非标准文本时仍能 fallback
+- 非 reproducer agent 不下发这 3 个工具
+- 或非 reproducer agent 调用它们时被宿主层统一拒绝
 
-### Phase 4：结果落盘
+这部分目前只是已知边界，不是本轮已收口项。
 
-目标：
+### 6.5 落盘仍以文本摘要为主
 
-- `/src` 有稳定产物输出
+当前 `02_reproduction_plan.txt` 已经可以保存 `/src` 步骤合同摘要，但仍是文本兼容形态。
 
-任务：
+这意味着：
 
-- 新增 `src_repro/output.py`
-- 新增 `save_src_repro_bundle` 工具
-- root agent 在成功/失败/不可复现时都能落盘
+- 当前 run 目录里还没有结构化的 `src_repro_plan.json`
+- 后续若要做更强的审计、重放或 UI 二次展示，仍需要结构化落盘
 
-验收：
+## 7. 下一步建议
 
-- run 目录下出现 `src_repro/<bundle_id>/`
-- 包含 source report、analysis、plan、verdict 等文件
+建议按以下顺序推进：
 
-### Phase 5：测试与收口
+1. 收紧 analyzer 对普通登录态场景的判定，避免误把普通会话需求判成 `can_reproduce=false`
+2. 继续收口左侧聊天区的过程性文本，优先隐藏 `<think>` 并减少步骤口头复述
+3. 视需要把 `/src` 步骤合同增加结构化 JSON 落盘，而不只保留文本摘要
+4. 视需要把宿主层校验继续收紧到：
+   - 未创建 plan 时不允许提前 `agent_finish`
+   - 最终 `Execution Todo` 必须与真实 plan 对齐
+   - 最终 verdict 与步骤状态、阻塞状态保持一致
+5. 视需要继续收紧工具暴露边界：
+   - 只对 `/src` reproducer 下发计划工具
+   - 或非 reproducer 调用计划工具时宿主层直接拒绝
+6. 用真实漏洞报告继续做回归，重点覆盖：
+   - 普通登录态 XSS
+   - UI + API 混合场景
+   - 历史凭据仅作证据、不作当前输入的案例
 
-目标：
+## 8. 当前结论
 
-- `/src` 最小闭环可回归
+当前 `/src` 已经完成第一版主链路收口：
 
-任务：
+- 主流程已简化
+- 多余支线已移除
+- 产物已可落盘
+- 回归已可跑通
 
-- 增加 interface tests
-- 增加 output tests
-- 增加 src_repro tool tests
-- 增加一条最小集成测试
+但它还不是最终形态。
 
-验收：
+当前最重要的后续工作不是再加更多分支，而是继续集中做以下几件事：
 
-- 测试通过
-- 手工验证一条 `/src @file` 路径
-
-## 10. 测试计划
-
-### 10.1 单元测试
-
-- `tests/interface/test_slash_commands.py`
-  - 解析 `/src text`
-  - 解析 `/src @file`
-  - 文件不存在报错
-- `tests/src_repro/test_result_parser.py`
-  - 标准 JSON
-  - code block JSON
-  - fallback 文本推断
-- `tests/src_repro/test_prompt_budget.py`
-  - 长文本裁剪
-  - 高优先级字段保留
-- `tests/src_repro/test_output.py`
-  - 输出目录创建
-  - manifest 写入
-- `tests/tools/test_src_repro_actions.py`
-  - 工具参数校验
-  - 文件成功写出
-
-### 10.2 集成测试
-
-- `tests/interface/test_tui_src_dispatch.py`
-  - `/src` 是否路由到 root
-- `tests/integration/test_src_repro_minimal_flow.py`
-  - mock analyzer/planner/reproducer
-  - 走完整闭环
-
-## 11. 风险与规避
-
-### 风险 1：root agent 仍按默认 scan 思维运行
-
-规避：
-
-- `src_repro_root.md` 必须明确禁止 recon / broad scan
-- 宿主层消息模板必须明确 mode
-
-### 风险 2：analyzer 输出不稳定
-
-规避：
-
-- 迁移旧项目 `AnalysisService.parse_analysis()` 的 fallback 逻辑
-
-### 风险 3：reproducer 擅自扩展计划
-
-规避：
-
-- skill 中严格约束
-- root agent 在 prompt 中强调“只执行计划”
-
-### 风险 4：结果落盘与 tracer 目录冲突
-
-规避：
-
-- `/src` 统一使用 `strix_runs/<run_name>/src_repro/<bundle_id>/`
-- 不覆盖现有 vulnerability report 目录
-
-### 风险 5：当前 root agent 正在运行普通扫描
-
-规避：
-
-- `/src` 派发前先 cancel root 当前执行
-- 明确 `/src` 是高优先级新任务
-
-## 12. 交付验收标准
-
-以下全部满足，视为本次 `/src` 第一阶段二开完成：
-
-- TUI 中支持 `/src <text>` 与 `/src @file`
-- `/src` 任务被正确路由到 root agent
-- root agent 自动加载 `/src` 专用编排 skill
-- analyzer / planner / reproducer 三阶段按顺序执行
-- analyzer 能输出并解析 `can_reproduce/reason/missing_info`
-- planner 能输出结构化复现步骤
-- reproducer 能调用 Strix 现有工具执行
-- root agent 最终能保存 source report、analysis、plan、trace、verdict
-- 关键测试通过
-
-## 13. 建议实施顺序
-
-建议按以下顺序推进，避免一次改动过大：
-
-1. 先做 `/src` 命令入口和 root 路由
-2. 再加 `src_repro_root.md`
-3. 再加 analyzer / planner / reproducer skill
-4. 再加 `result_parser.py` 和 `prompt_budget.py`
-5. 再加 `save_src_repro_bundle`
-6. 最后补测试和 UI 优化
-
-## 14. 备注
-
-本计划面向第一阶段可用版本，目标是把“纯文本报告驱动复现”落到 Strix 现有架构中。
-
-后续如需继续演进，可在第二阶段考虑：
-
-- 支持 Markdown / JSON 报告格式规范化输入
-- 增加 `/src-review`、`/src-rerun` 等命令
-- 增加 DOCX 输出
-- 增加 replay / resume
-- 为 `/src` 结果增加专用 renderer
-
-## 15. 当前执行状态（2026-03-30）
-
-### 当前阶段
-
-- 已完成 Phase 1：命令入口与最小骨架
-- 已完成 Phase 2：skill 与 agent 编排首版接入
-- 已完成 Phase 3：结果解析与 prompt budget 已接入真实 `/src` root 编排
-- 已完成 Phase 4：结果落盘与 `save_src_repro_bundle` 已接入
-- Phase 5 进行中：最小闭环集成测试已补齐，剩余手工验收可按需执行
-
-### 本次已完成
-
-- 新增 `strix/interface/slash_commands.py`，完成 `/src <text>` 与 `/src @file` 解析
-- 新增结构化 `<src_repro_task>` 消息构造，统一把 `report_text` 注入 root agent
-- 修改 `strix/interface/tui.py`，让 `/src` 强制路由到 root agent，而不是当前选中的子 agent
-- 修改 `strix/interface/tui.py`，补充 `/src` help 文案，并抽出通用消息发送与取消执行逻辑
-- 修改 `strix/tools/agents_graph/agents_graph_actions.py`，新增 `get_root_agent_id()` 与 `get_agent_instance()`
-- 修改 `strix/interface/__init__.py`，改为延迟导入 `main`，降低测试时的导入副作用
-- 修改 `strix/tools/registry.py`，为 `defusedxml` 缺失场景增加标准库回退，保证轻量测试环境可运行
-- 新增 `tests/interface/test_slash_commands.py`
-- 新增 `tests/interface/test_tui_src_dispatch.py`
-- 新增 `tests/tools/test_agents_graph_host_helpers.py`
-- 新增 `strix/skills/coordination/src_repro_root.md`
-- 新增 `strix/skills/src_report/report_repro_analyzer.md`
-- 新增 `strix/skills/src_report/report_to_repro_checklist.md`
-- 新增 `strix/skills/src_report/repro_plan_executor.md`
-- 修改 `strix/skills/coordination/root_agent.md`，加入 `<src_repro_task>` 模式覆盖规则
-- 修改 `strix/tools/agents_graph/agents_graph_actions.py`，新增宿主侧 `load_skills_into_agent()` 以支持运行时注入 `/src` root skill
-- 修改 `strix/interface/tui.py`，在 `/src` 派发前自动向 root agent 注入 `src_repro_root`
-- 新增 `tests/tools/test_agents_graph_skill_loading.py`
-- 新增 `tests/skills/test_src_repro_skills.py`
-- 新增 `strix/src_repro/__init__.py`
-- 新增 `strix/src_repro/contracts.py`
-- 新增 `strix/src_repro/result_parser.py`
-- 新增 `strix/src_repro/prompt_budget.py`
-- 新增 `strix/src_repro/orchestration.py`
-- 修改 `strix/agents/base_agent.py`，增加 root 级特殊任务钩子 `_maybe_handle_special_task()`
-- 修改 `strix/agents/StrixAgent/strix_agent.py`，让 root agent 在收到 `<src_repro_task>` 后走确定性的 analyzer -> planner -> reproducer 编排
-- 修改 `strix/tools/agents_graph/agents_graph_actions.py`，为内部编排新增 `interactive_override` 支持，让 `/src` 子 agent 以非交互模式真正结束并回传结果
-- 新增 `strix/src_repro/output.py`
-- 新增 `strix/tools/src_repro/__init__.py`
-- 新增 `strix/tools/src_repro/src_repro_actions.py`
-- 新增 `strix/tools/src_repro/src_repro_actions_schema.xml`
-- 修改 `strix/tools/__init__.py`，注册 `/src` 结果落盘工具
-- 修改 `strix/agents/StrixAgent/strix_agent.py`，在 `/src` 编排收尾时调用 `save_src_repro_bundle` 并回填 artifacts
-- 新增 `tests/src_repro/test_result_parser.py`
-- 新增 `tests/src_repro/test_prompt_budget.py`
-- 新增 `tests/src_repro/test_orchestration.py`
-- 新增 `tests/src_repro/test_output.py`
-- 新增 `tests/agents/test_strix_src_repro_runtime.py`
-- 新增 `tests/tools/test_src_repro_actions.py`
-- 新增 `tests/integration/test_src_repro_minimal_flow.py`
-- 修改 `strix/config/config.py`，新增 `.env` 自动发现与加载逻辑，支持从当前工作目录或最近父目录读取模型与运行配置
-- 修改 `strix/interface/main.py`，在应用入口最前面自动加载 `.env`，并保持显式环境变量优先于 `.env`
-- 新增 `tests/config/test_config_dotenv.py`
-- 修改 `strix/interface/tui.py`，修复工具 renderer 返回 `Static` 时访问 `.renderable` 导致的 TUI 崩溃
-- 新增 `tests/interface/test_tui_tool_rendering.py`
-- 修改 `strix/skills/src_report/report_repro_analyzer.md`，补充类型路由、混合场景联合判定、认证材料阻塞规则和标准 `missing_info` 短句
-- 修改 `strix/skills/src_report/report_to_repro_checklist.md`，补充当前 Strix 工具路由、API 优先规划、敏感字段脱敏和最终证据采集步骤约束
-- 修改 `strix/skills/src_report/repro_plan_executor.md`，补充输入完整性校验、工具优先级、`execute_js` 使用边界、计划外探索禁止和止损收口规则
-- 再次修改 `strix/skills/src_report/report_repro_analyzer.md`，将认证相关信息抽象为 `execution_prerequisite`、`historical_packet_evidence`、`success_marker`、`post_exploitation_result` 等通用字段角色，并补充 `Authorization: bearer null` 不能单独证明“无需认证”的规则
-- 再次修改 `strix/skills/src_report/report_to_repro_checklist.md`，补充 role-aware planning 规则，禁止把历史抓包、成功后泄露结果或成功标志写入 `## Preconditions` 或执行输入
-- 再次修改 `strix/skills/src_report/repro_plan_executor.md`，补充 decisive validation 规则，要求只有真正完成目标侧验证时才能输出 `not reproducible`，代理/工具/环境阻塞统一归类为 `blocked`
-- 修改 `tests/skills/test_src_repro_skills.py`，补充针对上述通用规则的字符串级回归断言
-- 已执行 `uv run pytest tests/skills/test_src_repro_skills.py -q`
-- 已执行 `uv run python -m compileall strix`
-- 修改 `strix/interface/tui.py`，在 `/src` 非法输入或 `@file` 解析失败时增加 TUI 可见错误提示，并在当前聊天面板补本地 assistant 提示消息，避免表现为静默失败
-- 修改 `tests/interface/test_tui_src_dispatch.py`，补充裸 `/src` 与错误 `@file` 的交互回归测试
-- 已执行 `uv run pytest tests/interface/test_tui_src_dispatch.py tests/interface/test_slash_commands.py tests/interface/test_tui_tool_rendering.py -q`
-- 已再次执行 `uv run python -m compileall strix`
-- 修改 `strix/src_repro/orchestration.py`，将 analyzer / planner / reproducer 的宿主侧任务模板、阶段名和根级状态消息统一改为中文输出
-- 修改 `strix/agents/StrixAgent/strix_agent.py`，将 `/src` 编排失败、产物保存成功/失败等宿主侧消息统一改为中文
-- 修改 `strix/tools/src_repro/src_repro_actions.py`，将 `/src` 产物保存工具返回消息统一改为中文
-- 再次修改 `strix/skills/src_report/report_repro_analyzer.md`，强制 `reason` 与 `missing_info` 使用中文，并进一步收紧认证/登录态规则：仅凭历史抓包中的 JWT/Cookie/Authorization 不再视为可复现前提；未明确允许“测试者自备普通有效登录态”的认证页面/接口场景一律按阻塞处理
-- 修改 `tests/src_repro/test_orchestration.py` 与 `tests/skills/test_src_repro_skills.py`，补充针对中文编排输出和 analyzer 收紧规则的回归断言
-- 已执行 `uv run pytest tests/src_repro/test_orchestration.py tests/skills/test_src_repro_skills.py tests/tools/test_src_repro_actions.py -q`
-- 已再次执行 `uv run python -m compileall strix`
-- 再次修改 `strix/skills/src_report/report_repro_analyzer.md`，将认证前提进一步细分为：
-  - `ordinary_authenticated_session_required`
-  - `special_role_or_special_account_required`
-  - `specific_report_secret_required_now`
-- 调整 analyzer 联合判定规则：普通登录态需求不再自动视为阻塞；仅在“特殊角色/特殊账号/必须复用特定报告 secret”时才因认证前提缺失直接 `can_reproduce=false`
-- 修改 `strix/skills/src_report/report_to_repro_checklist.md`，允许 planner 在普通登录态场景下写出 `需要测试者自备普通有效登录态` 这类前置条件，而不是把历史 JWT/Cookie 当成执行输入
-- 修改 `tests/skills/test_src_repro_skills.py`，补充对上述认证分类与 planner 前置条件规则的回归断言
-- 已执行 `uv run pytest tests/skills/test_src_repro_skills.py tests/src_repro/test_orchestration.py -q`
-- 已再次执行 `uv run python -m compileall strix`
-- 再次修改 `strix/skills/src_report/report_to_repro_checklist.md`，将 `Detailed Reproduction Steps` 收紧为“原子步骤 + 具体动作/调用”格式，新增 `Suggested Action / Invocation`、`Required Inputs`、`Evidence Type`、`Stop / Failure Rule` 字段，并明确禁止把 UI 触发、抓包检查、响应查看合并成单一步骤
-- 修改 `tests/skills/test_src_repro_skills.py`，补充对 planner 新步骤字段、反合并规则和 `execute_js` 规划边界的回归断言
-- 再次修改 `strix/skills/src_report/repro_plan_executor.md`，将执行规则收紧到动作级：要求优先遵守 `Suggested Action / Invocation`，禁止用 `execute_js` 替代计划中的 `click/type/press_key/list_requests/view_request/repeat_request` 等动作，并补充浏览器触发流量后的抓包、看包、重放执行纪律
-- 修改 `tests/skills/test_src_repro_skills.py`，补充对 executor 动作级约束、反 `execute_js` 偏航规则和动作级执行轨迹字段的回归断言
-- 将 `/src` 复现相关 skill 全面中文化：`src_repro_root.md`、`report_repro_analyzer.md`、`report_to_repro_checklist.md`、`repro_plan_executor.md` 的说明、标题和规则文案统一改为中文，同时保留必要的结构化字段名、工具名和合同字段
-- 修改 `tests/skills/test_src_repro_skills.py`，将复现相关 skill 的字符串级断言同步切换为中文版本
-- 修改 `strix/interface/slash_commands.py`，新增 `/src run <report>` 与 `/src run @file` 子命令，允许显式跳过 analyzer 直接进入 planner -> reproducer
-- 修改 `strix/src_repro/contracts.py` 与 `strix/src_repro/orchestration.py`，为 `/src` 任务增加 `skip_analysis` 标记，并在跳过分析模式下注入“用户显式跳过分析”的合成 analysis 结果
-- 修改 `tests/interface/test_slash_commands.py`、`tests/interface/test_tui_src_dispatch.py`、`tests/src_repro/test_orchestration.py`，补充 `/src run` 的命令解析、TUI 路由和跳过 analyzer 编排回归
-- 修改 `strix/src_repro/orchestration.py`，调整 reproducer 阶段任务模板：默认不再下发原始漏洞报告正文，只下发 `reproduction_plan`、`analysis_json` 与 `original_report_source`（文件路径/目录/文件名）元信息
-- 修改 `strix/tools/src_repro/src_repro_actions.py` 与 `strix/tools/src_repro/src_repro_actions_schema.xml`，新增宿主侧 `load_src_report_source` 工具，允许 reproducer 仅在执行遇到真实信息缺口时按 `source_label` 有界回看文件版原始报告
-- 修改 `strix/tools/src_repro/__init__.py`，导出 `load_src_report_source`
-- 修改 `tests/tools/test_src_repro_actions.py` 与 `tests/src_repro/test_orchestration.py`，补充“reproducer 不再收到原始报告正文”以及“可按需读取文件版原始报告”的回归断言
-- 再次修改 `strix/skills/src_report/repro_plan_executor.md`，新增“默认只按 `reproduction_plan` 执行、不得开局通读原始报告、只有真实信息缺口时才允许优先使用 `load_src_report_source` 回看原报告”的执行纪律
-- 再次修改 `strix/skills/src_report/report_to_repro_checklist.md`，要求 planner 尽量把 URL、endpoint、HTTP 方法、字段名、payload、成功标志等执行关键字段直接保留在步骤文本中，减少 reproducer 对回看原始报告的依赖
-- 修改 `tests/skills/test_src_repro_skills.py`，补充对上述 planner / executor 新规则的字符串级回归断言
-- 已执行 `uv run pytest tests/src_repro/test_orchestration.py tests/tools/test_src_repro_actions.py tests/interface/test_slash_commands.py -q`
-- 已执行 `uv run pytest tests/skills/test_src_repro_skills.py tests/src_repro/test_orchestration.py tests/tools/test_src_repro_actions.py -q`
-- 已再次执行 `uv run python -m compileall strix`
-
-### 当前未完成
-
-- 尚未执行手工 `/src @file` 路径验收
-- 尚未按“当前仓库源码宿主 + 远端 sandbox 镜像”模式完成一轮手工验收
-- 尚未补 `/src` 结果在 TUI 中的专用 renderer
-- 宿主层尚未对 reproducer 是否违规提前回看原始报告做硬校验；当前主要依赖 planner / executor skill 约束
-
-### 当前阻塞与风险
-
-- 当前对子 agent 回传的依赖仍是 `<agent_completion_report><summary>...</summary>` 约定，后续适合补更强的集成回归
-- `/src` bundle 已落盘到 run 目录，但还没有专门的 UI 展示组件
-- 手工验收时容易把“宿主源码能力”和“sandbox 镜像能力”混淆；当前 `/src` 入口、编排、结果解析与落盘都在宿主 Python 代码，不在远端 sandbox 镜像内
-- 当前 Strix skill 机制仅支持加载单个 `.md` 技能文件，不支持像 `F:\Study\strix\Note\fx-skills` 那样按目录自动读取 `SKILL.md`、`references/`、`scripts/` 等技能包内容；这导致旧版 `fx-skills` 中的类型路由、混合场景联合判定、工具路由、脱敏规则、停止条件和证据 manifest 规则没有被当前 `/src` skills 继承
-- 上述 skill 机制差异已经实质影响当前 `/src` 行为；虽然已补多轮通用抽象，当前 analyzer 仍需要继续通过真实报告回归来验证“普通登录态 / 特殊角色 / 特定 secret 复用”三类认证前提在不同漏洞类型下是否稳定
-- `/src` 宿主侧可见输出已统一改为中文，但仍需继续用真实报告回归确认 analyzer 子 agent 在长文本、混合 UI/API 报告中的最终 `reason` 不再漂移到英文
-- planner 虽已收紧为“具体动作/调用”格式，但宿主层仍未对 reproducer 的实际工具选择做硬校验；当前仍存在 child agent 在 API/代理验证场景下偏向 `browser_action(action="execute_js")` 的风险
-- executor 虽已收紧为动作级执行纪律，但当前仍然依赖 prompt 约束而非宿主层硬校验；若模型继续违背计划，下一步仍需在宿主侧增加 tool/action drift 检测
-- planner / executor 虽已分别收紧为“尽量把关键执行字段写进步骤”和“只有信息缺口时才回看原报告”，但当前仍缺少宿主层对“是否过早调用 `load_src_report_source`”的硬性审计
-- `/src run` 允许显式跳过 analyzer，这提升了人工强制执行能力，但也意味着低质量报告会更容易直接把时间消耗在 planner / reproducer 阶段；后续应在产物和 UI 中明确标记“analysis skipped”
-- `Note/` 目录仍是未跟踪状态，后续提交时需要继续避免误纳入
-
-### 已完成验证
-
-- 已通过 `tests/interface/test_slash_commands.py`
-- 已通过 `tests/interface/test_tui_src_dispatch.py`
-- 已通过 `tests/tools/test_agents_graph_host_helpers.py`
-- 已通过 `tests/tools/test_agents_graph_skill_loading.py`
-- 已通过 `tests/skills/test_src_repro_skills.py`
-- 已通过 `tests/src_repro/test_result_parser.py`
-- 已通过 `tests/src_repro/test_prompt_budget.py`
-- 已通过 `tests/src_repro/test_orchestration.py`
-- 已通过 `tests/src_repro/test_output.py`
-- 已通过 `tests/agents/test_strix_src_repro_runtime.py`
-- 已通过 `tests/tools/test_src_repro_actions.py`
-- 已通过 `tests/integration/test_src_repro_minimal_flow.py`
-- 已通过 `/src` 相关自动化回归汇总：36 passed
-- 已通过 `tests/skills/test_src_repro_skills.py`
-- 已通过第二轮通用规则收紧后的 `tests/skills/test_src_repro_skills.py`
-- 已通过 `/src` 非法输入交互回归：`tests/interface/test_tui_src_dispatch.py`、`tests/interface/test_slash_commands.py`、`tests/interface/test_tui_tool_rendering.py`
-- 已通过中文编排输出与 analyzer 收紧回归：`tests/src_repro/test_orchestration.py`、`tests/skills/test_src_repro_skills.py`、`tests/tools/test_src_repro_actions.py`
-- 已通过普通登录态认证分类回归：`tests/skills/test_src_repro_skills.py`、`tests/src_repro/test_orchestration.py`
-- 已通过“reproducer 默认不收原始报告正文、按需回看原报告”回归：`tests/src_repro/test_orchestration.py`、`tests/tools/test_src_repro_actions.py`
-- 已通过 planner / executor 最新收紧规则回归：`tests/skills/test_src_repro_skills.py`
-- 已通过 `uv run python -m compileall strix`
-
-### 建议下一步
-
-- 先按 `plan/2026-03-27-strix-src-local-acceptance.md` 执行一次“当前仓库源码宿主 + 远端 sandbox 镜像”的手工验收
-- 视需要执行一次手工 `/src @file` 验收
-- 继续围绕 analyzer 的认证前提模型做下一轮收敛：将“必须复用报告中的特定凭据”和“测试者自备普通有效登录态即可”拆成不同的通用判定分支
-- 继续围绕 planner / executor / 宿主层三处收口：将“步骤建议”逐步升级为“可校验的动作级约束”，并考虑在宿主层识别 reproducer 的工具偏航
-- 继续围绕“原始报告回看”补宿主层收口：记录 reproducer 是否过早调用 `load_src_report_source`，并视需要把“只允许信息缺口时回看”升级为可审计或可拦截规则
-- 视需要增加 `/src` 结果专用 renderer
+- 让 analyzer 判定更稳
+- 让左侧与右侧的 `/src` 展示职责进一步分离
+- 把已经落地的 `/src` 专用步骤合同继续往“可审计、可落盘、可校验”方向收口
