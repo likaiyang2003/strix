@@ -83,17 +83,23 @@ def _append_full_step_details(text: Text, step: dict[str, Any]) -> None:
     text.append(f"{step_id} ", style="bold")
     text.append(title, style=_status_style(status))
 
-    for label, key in [
+    detail_fields = [
         ("目标", "objective"),
         ("动作", "suggested_action"),
         ("预期证据", "expected_evidence"),
-        ("失败判断", "failure_judgment"),
+        ("成功判断", "success_judgment"),
+        ("负向判断", "negative_judgment"),
+        ("阻塞判断", "blocked_judgment"),
         ("停止规则", "stop_rule"),
         ("实际动作", "actual_action"),
         ("实际观察", "actual_observation"),
         ("实际证据", "actual_evidence"),
         ("备注", "notes"),
-    ]:
+    ]
+    if not str(step.get("negative_judgment") or "").strip():
+        detail_fields.insert(6, ("失败判断", "failure_judgment"))
+
+    for label, key in detail_fields:
         value = str(step.get(key) or "").strip()
         if value:
             text.append("\n    ")

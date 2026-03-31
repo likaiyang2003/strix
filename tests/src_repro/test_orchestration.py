@@ -90,6 +90,14 @@ def test_build_reproducer_task_embeds_report_text_only() -> None:
     assert "不得默认用裸 `send_request` 作为第一条主路线" in rendered
     assert "先进入 UI 并生成当前会话中的真实请求" in rendered
     assert "不要立刻结束整个任务，应继续走该有界分支" in rendered
+    assert "先用三层规则思考" in rendered
+    assert "一个决定性验证节点只对应一个步骤" in rendered
+    assert "验证节点骨架" in rendered
+    assert "漏洞族覆盖规则" in rendered
+    assert "统一通过 verdict 闸门收口" in rendered
+    assert "优先使用 `success_judgment`、`negative_judgment`、`blocked_judgment`" in rendered
+    assert "`success_judgment` 只写目标侧成功证据" in rendered
+    assert "judgment 只能评价当前步骤对应的那个节点，不得跨步引用后续节点" in rendered
     assert "本地信号不等于目标侧成功证据" in rendered
     assert "只有真实请求/响应证据、目标页面回显/存储证据" in rendered
     assert "判 `not reproducible`；还是决定性验证根本未完成，从而判 `blocked`" in rendered

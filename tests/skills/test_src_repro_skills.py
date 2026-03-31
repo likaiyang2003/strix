@@ -73,8 +73,27 @@ def test_load_skills_can_load_src_repro_root_and_src_report_skills() -> None:
     assert "如果决定性验证步骤从未真正完成，不能判 `not reproducible`，只能判 `blocked`" in executor_skill
     assert "对 `ui_navigation + packet_replay` 联合场景，默认至少拆成 3 步" in executor_skill
     assert "严禁把“发送请求 + 验证响应 + 验证页面执行”合并成一个步骤" in executor_skill
-    assert "`failure_judgment`" in executor_skill
+    assert "## 三层规则" in executor_skill
+    assert "### 第一层：验证节点骨架" in executor_skill
+    assert "`entry_or_reachability`" in executor_skill
+    assert "`transport_request`" in executor_skill
+    assert "`render_or_trigger`" in executor_skill
+    assert "### 第二层：漏洞族覆盖规则" in executor_skill
+    assert "#### stored_xss_or_stored_injection" in executor_skill
+    assert "#### authz_or_idor_or_logic_bypass" in executor_skill
+    assert "#### ssrf_or_blind_oob" in executor_skill
+    assert "### 第三层：统一 verdict 闸门" in executor_skill
+    assert "`success_judgment`" in executor_skill
+    assert "`negative_judgment`" in executor_skill
+    assert "`blocked_judgment`" in executor_skill
     assert "对所有决定性验证步骤" in executor_skill
+    assert "## 步骤 judgment 语义" in executor_skill
+    assert "一个决定性验证节点只对应一个步骤" in executor_skill
+    assert "judgment 只能评价当前步骤对应的那个节点，不得跨步评价后续节点" in executor_skill
+    assert "不得在“请求发送”步骤里写“服务器响应异常”这类属于响应节点的 judgment" in executor_skill
+    assert "不得在“响应验证”步骤里写“页面未弹窗”这类属于页面执行节点的 judgment" in executor_skill
+    assert "不得在单个步骤的 `stop_rule` 中直接写出最终 verdict" in executor_skill
+    assert "不得把“未捕获到请求”和“已捕获请求但 payload 被过滤/改写”写进同一个 judgment" in executor_skill
     assert "本地信号不等于目标侧证据" in executor_skill
     assert "payload 只是出现在输入框、textarea、contenteditable 或本地 DOM 中" in executor_skill
     assert "如果你只有“本地信号”，而没有任何目标侧证据，则最终 verdict 不得为 `reproducible`" in executor_skill

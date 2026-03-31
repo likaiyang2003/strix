@@ -218,6 +218,9 @@ Reproducer 直接读取 `report_text` 执行，不再接收 planner 产物。
 - reproducer 已补充“联合场景默认优先走 UI 会话链路，不再机械地裸放包优先”的规则
 - `/src` 步骤合同已补充 `failure_judgment` 字段，用于显式表达每一步的失败/未命中判断
 - reproducer 已补充“本地信号不等于目标侧成功证据”的规则，防止把本地 DOM/JS 操作误判为复现成功
+- reproducer 已补充“三层规则”：验证节点骨架 + 漏洞族覆盖规则 + 统一 verdict 闸门
+- `/src` 步骤合同进一步细化为 `success_judgment` / `negative_judgment` / `blocked_judgment`
+- reproducer 已补充“单节点单步骤 + judgment 不跨步”规则，防止在一个步骤内混合请求、响应、页面执行判断
 - 宿主层已只对 `/src` reproducer 强制 `src_repro_plan`
 - `/src` reproducer 已禁止使用通用 `todo`
 - `/src` 结果落盘
@@ -299,6 +302,8 @@ python -m pytest -o addopts='' tests/skills/test_src_repro_skills.py -q
 - 单个 API 分支被代理或中间层阻断时，如果报告内仍有尚未尝试的有界 UI 分支，不应立刻结束整个任务
 - 本地输入框填充、自己注入的 JS 日志、alert 监控钩子命中等“本地信号”不能单独支持 `reproducible`
 - 最终未命中成功标志时，必须明确落到 `not reproducible` 或 `blocked`
+- 计划生成前需先抽取固定验证节点，再按漏洞族补齐必须保留的验证链，最后统一通过 verdict 闸门收口
+- 步骤级失败语义已细分为：命中成功证据、已完成验证但未命中成功标志、无法完成决定性验证
 
 但这些目前仍主要依赖 skill 约束，而不是宿主层硬校验。
 

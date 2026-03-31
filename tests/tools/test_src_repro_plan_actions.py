@@ -31,6 +31,9 @@ def test_create_src_repro_plan_creates_ordered_steps_and_context() -> None:
             "required_inputs": ["https://demo.local"],
             "expected_evidence": "首页成功加载",
             "evidence_type": "ui",
+            "success_judgment": "首页加载且入口可见则该步成功",
+            "negative_judgment": "首页已加载但关键入口缺失则记为负向结果",
+            "blocked_judgment": "页面无法访问或无法完成加载则该步阻塞",
             "failure_judgment": "页面未加载或入口不存在则该步失败",
             "stop_rule": "无法访问则 blocked"
           },
@@ -44,6 +47,9 @@ def test_create_src_repro_plan_creates_ordered_steps_and_context() -> None:
     assert result["success"] is True
     assert result["plan"]["title"] == "Demo Plan"
     assert result["plan"]["steps"][0]["step_id"] == "S1"
+    assert result["plan"]["steps"][0]["success_judgment"] == "首页加载且入口可见则该步成功"
+    assert result["plan"]["steps"][0]["negative_judgment"] == "首页已加载但关键入口缺失则记为负向结果"
+    assert result["plan"]["steps"][0]["blocked_judgment"] == "页面无法访问或无法完成加载则该步阻塞"
     assert result["plan"]["steps"][0]["failure_judgment"] == "页面未加载或入口不存在则该步失败"
     assert result["plan"]["steps"][1]["step_id"] == "S2"
     assert agent_state.context["src_repro_plan_created"] is True
