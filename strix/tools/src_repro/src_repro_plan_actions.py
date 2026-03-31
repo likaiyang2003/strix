@@ -90,6 +90,7 @@ def _normalize_step_entry(raw_step: Any, order: int) -> dict[str, Any]:
             "required_inputs": [],
             "expected_evidence": "",
             "evidence_type": "",
+            "failure_judgment": "",
             "stop_rule": "",
             "status": "pending",
             "notes": None,
@@ -124,6 +125,9 @@ def _normalize_step_entry(raw_step: Any, order: int) -> dict[str, Any]:
             raw_step.get("expected_evidence") or raw_step.get("evidence") or ""
         ).strip(),
         "evidence_type": str(raw_step.get("evidence_type") or "").strip(),
+        "failure_judgment": str(
+            raw_step.get("failure_judgment") or raw_step.get("failure_rule") or ""
+        ).strip(),
         "stop_rule": str(raw_step.get("stop_rule") or "").strip(),
         "status": normalized_status,
         "notes": str(raw_step.get("notes") or "").strip() or None,

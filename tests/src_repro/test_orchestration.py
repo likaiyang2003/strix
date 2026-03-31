@@ -87,6 +87,12 @@ def test_build_reproducer_task_embeds_report_text_only() -> None:
     assert "create_src_repro_plan" in rendered
     assert "update_src_repro_plan_step" in rendered
     assert "get_src_repro_plan" in rendered
+    assert "不得默认用裸 `send_request` 作为第一条主路线" in rendered
+    assert "先进入 UI 并生成当前会话中的真实请求" in rendered
+    assert "不要立刻结束整个任务，应继续走该有界分支" in rendered
+    assert "本地信号不等于目标侧成功证据" in rendered
+    assert "只有真实请求/响应证据、目标页面回显/存储证据" in rendered
+    assert "判 `not reproducible`；还是决定性验证根本未完成，从而判 `blocked`" in rendered
     assert "`todo`" in rendered
     assert "<original_report_source>" not in rendered
     assert "<reproduction_plan>" not in rendered

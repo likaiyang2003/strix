@@ -19,6 +19,13 @@ description: 判断一份纯文本漏洞报告是否包含足够可执行的信�
 最终 JSON 中的 `reason` 和 `missing_info` 必须使用中文。
 不得在 `reason` 或 `missing_info` 中输出英文句子。
 
+关键总原则：
+
+- 你判断的是“这份报告是否足以进入 reproducer 开始尝试”，不是“漏洞最终一定能否成功复现”
+- 只要报告已经足够让 reproducer 发起第一次有意义的受控复现尝试，就应优先判 `can_reproduce=true`
+- “可能最终失败”“可能已经修复”“可能执行后会 blocked” 这些都应交给 reproducer 处理，而不是在 analyzer 阶段提前拦截
+- 只有当报告缺口大到连第一次有意义尝试都无法开始时，才应返回 `can_reproduce=false`
+
 ## 范围
 
 - 只分析父 agent 提供的报告文本
@@ -49,6 +56,12 @@ description: 判断一份纯文本漏洞报告是否包含足够可执行的信�
 - 漏洞是存储型 XSS、业务逻辑问题等，一侧写入数据，另一侧随后渲染或校验
 
 在强制联合判定下，只要任一侧存在阻塞缺口，最终结论就必须是 `can_reproduce=false`。
+
+更严格的解释：
+
+- 这里的“阻塞缺口”必须是“使 reproducer 连第一次有意义尝试都无法开始”的硬缺口
+- 如果报告已经给出可执行的目标、请求形态、payload、成功标志，而剩余问题只是“普通登录态需由测试者自行准备”“历史 token 不应复用”“真实执行后可能 blocked”，则不应在 analyzer 阶段直接判 `can_reproduce=false`
+- 对联合场景，analyzer 只负责判断“是否值得进入 reproducer”；不要把“未来某一步可能失败”提前当成 analyzer 阶段的否决条件
 
 例外：
 
@@ -99,6 +112,7 @@ description: 判断一份纯文本漏洞报告是否包含足够可执行的信�
 - 当完整漏洞 URL、`Origin`、`Referer` 或 `Host` 清楚指向同一站点时，可以据此推断入口页
 - 像“打开官网 -> 点击在线客服 -> 进入聊天窗口”这样的自然语言链路，算作可用导航路径
 - 对普通认证用户功能来说，缺少一步一步的登录教程，本身不应直接视为阻塞
+- 对普通认证用户功能来说，只要报告已经提供明确目标、功能路径、请求形态、payload 与成功标志，即使没有说明“当前新鲜登录态如何获取”，通常也不应仅凭这一点返回 `can_reproduce=false`
 
 ### special_env
 
@@ -165,7 +179,7 @@ description: 判断一份纯文本漏洞报告是否包含足够可执行的信�
 - 若报告说 cookie、JWT、token 或其他凭据是在漏洞触发后泄露出来的，这些值必须归类为 `post_exploitation_result`，不得视为 `execution_prerequisite`
 - “页面显示用户已经登录”描述的是原报告者当时的上下文，不足以证明当前存在可复用会话
 - `Authorization: bearer null` 不能证明无需认证。认证需求必须根据完整流程判断，而不能仅凭这一字段
-- 如果报告展示了依赖会话的 UI 操作，但没有说明当前测试者如何重新获得该会话，则“当前缺少可用会话”应视为阻塞
+- 如果报告展示了依赖会话的 UI 操作，不要自动把“当前缺少可用会话”视为阻塞；只有在它属于特殊角色、特殊账号或必须复用特定历史 secret 的场景时，才应视为阻塞
 - 如果完整抓包只是用来证明原报告者曾经发出过该请求，除非报告明确说这些 token、cookie、checksum 现在还能用，否则不得假定可重放
 - 如果报告的成功描述是“payload 泄露了 document.cookie”或“响应暴露出 token”，那么泄露值应归到 `success_marker` 或 `post_exploitation_result`，而不是前置条件
 - 严禁从 `historical_packet_evidence`、`success_marker` 或 `post_exploitation_result` 反推 `execution_prerequisite`
@@ -185,6 +199,7 @@ description: 判断一份纯文本漏洞报告是否包含足够可执行的信�
 - 即使 payload、endpoint 和预期影响都存在，只要执行仍依赖不可用认证材料，就不得判为可复现
 - 若报告中出现历史 JWT、Cookie、Authorization、Jwt-Token、Checksum、Nonce、Appsecret 等字段，但没有证明它们当前仍可复用，则应把它们视为历史抓包证据，而非当前前提
 - 对混合 `packet_replay + ui_navigation` 场景，如果流程依赖特殊角色、特殊账号或特定可复用 secret，而报告没有说明当前测试者如何获得，就必须返回 `can_reproduce=false`
+- 对普通会话型存储 XSS、消息、客服、评论、工单、个人资料等场景，如果报告已给出清晰目标、写入动作、请求形态、payload 与成功标志，不得仅因“当前新鲜普通登录态获取方式未写出”而返回 `can_reproduce=false`
 
 ### 认证需求分类
 
@@ -210,6 +225,7 @@ description: 判断一份纯文本漏洞报告是否包含足够可执行的信�
 - `specific_report_secret_required_now` 除非报告明确证明该 secret 仍可用且应被复用，否则属于阻塞
 - 对已认证存储型 XSS、业务逻辑、个人资料、消息、工单、客服等功能，如果报告提供了明确功能路径、payload、请求形态和成功标志，而只隐含“普通已登录用户上下文”，不能仅因抓包里的 JWT/Cookie 是历史值就判为不可复现
 - 在这类普通会话场景下，真正的正确理解是：测试者可以用自己的新鲜普通会话继续尝试，历史凭据不是阻塞点
+- 如果你能合理判断“reproducer 仍可开始一次有界尝试，并把是否 blocked / 是否已修复交给后续执行阶段验证”，就应优先维持 `can_reproduce=true`
 
 ### Replay-First 充分性
 
@@ -251,6 +267,20 @@ description: 判断一份纯文本漏洞报告是否包含足够可执行的信�
 - “这份报告已经提供了足够的信息，可以现在就做一次有界复现”
 
 判断要务实，但不能过度乐观。只要缺失信息在现实中会阻碍执行或验证，就应视为阻塞。
+
+进一步收紧为以下决策顺序：
+
+1. 先问：新测试者现在能否基于报告开始第一次有意义尝试？
+2. 若能，则优先 `can_reproduce=true`
+3. 若只是“普通登录态需要自行准备”“历史 JWT/Cookie 不可直接复用”“目标可能已修复”“真实执行后可能卡在代理或环境”，这些都不应单独导致 `can_reproduce=false`
+4. 只有当目标、动作、验证锚点、必要特殊前提缺失到连第一次有意义尝试都无法开始时，才返回 `can_reproduce=false`
+
+典型应放行到 reproducer 的情况：
+
+- 普通登录态功能中的存储型 XSS
+- 需要 UI + API 联合验证，但报告已给出主要路径、请求和成功标志
+- 报告中的 token/cookie 只是历史证据，测试者可以用自己的新鲜普通会话继续尝试
+- 漏洞可能已被修复，需要由 reproducer 在真实执行后判定 `not reproducible` 或 `blocked`
 
 ## missing_info 规则
 

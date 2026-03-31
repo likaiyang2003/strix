@@ -42,6 +42,7 @@ def test_render_tool_content_simple_supports_src_repro_plan_renderer() -> None:
                             "suggested_action": "browser_action(action=\"launch\", url=\"https://demo.local\")",
                             "required_inputs": ["https://demo.local"],
                             "expected_evidence": "首页加载成功",
+                            "failure_judgment": "页面未加载则该步失败",
                             "status": "done",
                         },
                         {
@@ -60,6 +61,8 @@ def test_render_tool_content_simple_supports_src_repro_plan_renderer() -> None:
     assert "Demo Plan" in result.plain
     assert "S1 打开首页" in result.plain
     assert "检查代理流量" in result.plain
+    assert "失败判断" in result.plain
+    assert "页面未加载则该步失败" in result.plain
     assert "正在查看 POST 请求" in result.plain
 
 

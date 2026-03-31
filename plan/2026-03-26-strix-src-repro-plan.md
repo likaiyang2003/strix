@@ -213,6 +213,11 @@ Reproducer 直接读取 `report_text` 执行，不再接收 planner 产物。
 - `update_src_repro_plan_step` 已改为增量返回
 - `get_src_repro_plan` 左侧已改为简版快照展示
 - 右侧 sidebar 已新增 `SRC 状态` 简版步骤状态区
+- analyzer 已收紧为“只拦明显无法开始复现”的报告口径
+- reproducer 已补充“联合场景至少拆 3 步”与“Caido/代理错误页应判 blocked”的规则
+- reproducer 已补充“联合场景默认优先走 UI 会话链路，不再机械地裸放包优先”的规则
+- `/src` 步骤合同已补充 `failure_judgment` 字段，用于显式表达每一步的失败/未命中判断
+- reproducer 已补充“本地信号不等于目标侧成功证据”的规则，防止把本地 DOM/JS 操作误判为复现成功
 - 宿主层已只对 `/src` reproducer 强制 `src_repro_plan`
 - `/src` reproducer 已禁止使用通用 `todo`
 - `/src` 结果落盘
@@ -244,23 +249,19 @@ uv run pytest tests/skills/test_src_repro_skills.py tests/src_repro/test_orchest
 uv run pytest tests/tools/test_src_repro_plan_actions.py tests/interface/test_src_repro_plan_renderer.py -q
 uv run pytest tests/src_repro/test_orchestration.py tests/agents/test_strix_src_repro_runtime.py tests/integration/test_src_repro_minimal_flow.py -q
 uv run python -m compileall strix\tools\src_repro\src_repro_plan_actions.py strix\interface\tool_components\src_repro_plan_renderer.py strix\interface\tui.py
+python -m pytest -o addopts='' tests/skills/test_src_repro_skills.py -q
 ```
 
 ## 6. 当前未收口项
 
 ### 6.1 Analyzer 仍可能过严
 
-当前 analyzer 在“普通登录态即可继续尝试”的场景下，仍可能误判为：
-
-- 缺少可用认证令牌
-- 缺少当前登录态获取方式
-- `can_reproduce=false`
-
-典型受影响案例：
+当前 analyzer 虽已放宽到“只拦明显无法开始复现”的口径，但在以下场景中仍需继续用真实报告回归确认稳定性：
 
 - 普通用户会话下的存储型 XSS
 - 普通登录态业务功能中的逻辑漏洞
 - 报告提供了完整 endpoint / payload / success marker，但历史 JWT/Cookie 只是证据而不是当前必需输入
+- UI + API 联合场景中，analyzer 是否会仍然过早把未来可能的执行阻塞当成 analyzer 阶段的否决理由
 
 这部分仍需继续收紧 [report_repro_analyzer.md](/F:/Study/strix/strix/skills/src_report/report_repro_analyzer.md)。
 
@@ -286,7 +287,27 @@ uv run python -m compileall strix\tools\src_repro\src_repro_plan_actions.py stri
 - 收紧 reproducer 技能文案，减少口头复述
 - 视需要在 UI 层进一步压缩过程性 assistant 文本
 
-### 6.3 `/src` 步骤合同仍主要是“工具级 + prompt 级”组合约束
+### 6.3 Reproducer 的 plan 质量与 blocked 标记仍需继续观察
+
+当前 reproducer 已新增规则：
+
+- 联合 `ui_navigation + packet_replay` 场景默认至少拆成 3 步
+- 禁止把“发送请求 + 验证响应 + 验证页面执行”合并成一步
+- Caido / 代理错误页 / 中间层错误页应优先标记为 `blocked`
+- 不能把“工具调用结束”当作 `done`
+- 对带 UI 路径与页面端成功标志的联合场景，默认优先先走 UI 分支，再决定是否查看或重放当前真实请求
+- 单个 API 分支被代理或中间层阻断时，如果报告内仍有尚未尝试的有界 UI 分支，不应立刻结束整个任务
+- 本地输入框填充、自己注入的 JS 日志、alert 监控钩子命中等“本地信号”不能单独支持 `reproducible`
+- 最终未命中成功标志时，必须明确落到 `not reproducible` 或 `blocked`
+
+但这些目前仍主要依赖 skill 约束，而不是宿主层硬校验。
+
+因此仍需继续观察：
+
+- 真实报告下是否还会出现单步 `/src` plan
+- 是否还会把代理错误页、中间层错误页错标为 `done`
+
+### 6.4 `/src` 步骤合同仍主要是“工具级 + prompt 级”组合约束
 
 虽然当前已经落地：
 
@@ -302,7 +323,7 @@ uv run python -m compileall strix\tools\src_repro\src_repro_plan_actions.py stri
 - 宿主层还没有校验最终 `## 1) Execution Todo` 是否与实际 plan 完全一致
 - 宿主层还没有从工具结果反推“步骤覆盖率”并自动校对最终 verdict
 
-### 6.4 `/src` 计划工具当前仍是全局注册
+### 6.5 `/src` 计划工具当前仍是全局注册
 
 当前 `create_src_repro_plan` / `get_src_repro_plan` / `update_src_repro_plan_step`：
 
@@ -322,7 +343,7 @@ uv run python -m compileall strix\tools\src_repro\src_repro_plan_actions.py stri
 
 这部分目前只是已知边界，不是本轮已收口项。
 
-### 6.5 落盘仍以文本摘要为主
+### 6.6 落盘仍以文本摘要为主
 
 当前 `02_reproduction_plan.txt` 已经可以保存 `/src` 步骤合同摘要，但仍是文本兼容形态。
 

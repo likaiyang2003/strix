@@ -38,6 +38,10 @@ def test_load_skills_can_load_src_repro_root_and_src_report_skills() -> None:
     assert "ordinary_authenticated_session_required" in analyzer_skill
     assert "special_role_or_special_account_required" in analyzer_skill
     assert "specific_report_secret_required_now" in analyzer_skill
+    assert "你判断的是“这份报告是否足以进入 reproducer 开始尝试”" in analyzer_skill
+    assert "只要报告已经足够让 reproducer 发起第一次有意义的受控复现尝试，就应优先判 `can_reproduce=true`" in analyzer_skill
+    assert "普通登录态功能中的存储型 XSS" in analyzer_skill
+    assert "如果报告展示了依赖会话的 UI 操作，不要自动把“当前缺少可用会话”视为阻塞" in analyzer_skill
 
     planner_skill = loaded["report_to_repro_checklist"]
     assert "需要测试者自备普通有效登录态" in planner_skill
@@ -67,3 +71,19 @@ def test_load_skills_can_load_src_repro_root_and_src_report_skills() -> None:
     assert "不得在执行过程中二次回看文件版原始报告" in executor_skill
     assert "不得创建任何“缺口解析”子 agent" in executor_skill
     assert "如果决定性验证步骤从未真正完成，不能判 `not reproducible`，只能判 `blocked`" in executor_skill
+    assert "对 `ui_navigation + packet_replay` 联合场景，默认至少拆成 3 步" in executor_skill
+    assert "严禁把“发送请求 + 验证响应 + 验证页面执行”合并成一个步骤" in executor_skill
+    assert "`failure_judgment`" in executor_skill
+    assert "对所有决定性验证步骤" in executor_skill
+    assert "本地信号不等于目标侧证据" in executor_skill
+    assert "payload 只是出现在输入框、textarea、contenteditable 或本地 DOM 中" in executor_skill
+    assert "如果你只有“本地信号”，而没有任何目标侧证据，则最终 verdict 不得为 `reproducible`" in executor_skill
+    assert "不得机械地把 `send_request` / `repeat_request` 作为所有联合场景的第一步" in executor_skill
+    assert "则默认优先走“UI 进入 -> 生成当前会话中的真实请求 -> 再看是否需要重放”的路径" in executor_skill
+    assert "则不得先做“裸 `send_request` 放包”作为主路线" in executor_skill
+    assert "如果一个分支只是被代理层、中间层或工具层阻断" in executor_skill
+    assert "收到代理生成的错误页、Caido 错误页" in executor_skill
+    assert "`done` 不等于“工具调用结束了”" in executor_skill
+    assert "收到 Caido/proxy error page，尚未确认请求到达目标" in executor_skill
+    assert "则应回到报告已给出的 UI 路径继续尝试" in executor_skill
+    assert "不得用“虽然没看到弹窗，但应该已经成功”这种推断替代真实 verdict" in executor_skill

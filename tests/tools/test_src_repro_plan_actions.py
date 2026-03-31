@@ -31,6 +31,7 @@ def test_create_src_repro_plan_creates_ordered_steps_and_context() -> None:
             "required_inputs": ["https://demo.local"],
             "expected_evidence": "首页成功加载",
             "evidence_type": "ui",
+            "failure_judgment": "页面未加载或入口不存在则该步失败",
             "stop_rule": "无法访问则 blocked"
           },
           {
@@ -43,6 +44,7 @@ def test_create_src_repro_plan_creates_ordered_steps_and_context() -> None:
     assert result["success"] is True
     assert result["plan"]["title"] == "Demo Plan"
     assert result["plan"]["steps"][0]["step_id"] == "S1"
+    assert result["plan"]["steps"][0]["failure_judgment"] == "页面未加载或入口不存在则该步失败"
     assert result["plan"]["steps"][1]["step_id"] == "S2"
     assert agent_state.context["src_repro_plan_created"] is True
     assert agent_state.context["src_repro_plan_required"] is True

@@ -87,6 +87,7 @@ def _append_full_step_details(text: Text, step: dict[str, Any]) -> None:
         ("目标", "objective"),
         ("动作", "suggested_action"),
         ("预期证据", "expected_evidence"),
+        ("失败判断", "failure_judgment"),
         ("停止规则", "stop_rule"),
         ("实际动作", "actual_action"),
         ("实际观察", "actual_observation"),
