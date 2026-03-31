@@ -175,6 +175,66 @@ strix --target api.your-app.com --instruction "Focus on business logic flaws and
 strix --target api.your-app.com --instruction-file ./instruction.md
 ```
 
+### `/src` Report Reproduction Mode
+
+This branch also includes an interactive `/src` workflow for reproducing vulnerabilities directly from a plain-text report inside the TUI.
+
+Use `/src` when you already have a vulnerability report and want Strix to:
+
+- analyze whether the report is actionable enough to attempt reproduction
+- generate a structured reproduction plan
+- execute the reproduction flow with browser/proxy evidence collection
+
+Current workflow:
+
+- `/src` → `analyzer -> reproducer`
+- `/src run` → skip analyzer and go directly to `reproducer`
+
+Supported input forms:
+
+```text
+/src <report_text>
+/src @<file>
+/src run <report_text>
+/src run @<file>
+```
+
+Examples:
+
+```text
+/src 圆通速递存在存储型XSS漏洞……
+
+/src @demo-report.md
+
+/src run @roundcube-xss.md
+```
+
+Report file behavior:
+
+- relative `@file` references are resolved from the current working directory first
+- if the file is not found there, Strix automatically looks under `./Vul_report/`
+- example: `/src @demo-report.md` will resolve to `./Vul_report/demo-report.md` when present
+
+Current `/src` scope:
+
+- plain-text vulnerability reports
+- inline text input
+- `@file` file references
+
+Current `/src` non-goals:
+
+- DOCX parsing
+- HTML report parsing
+- OCR / image extraction
+- placeholder auto-fill
+
+Important notes:
+
+- `/src` is designed for bounded reproduction, not broad reconnaissance or generic scanning
+- if reproduction requires credentials, provide them in the initial `/src` input before the run starts
+- credentials sent after the reproducer is already running are not automatically injected into the active `/src` child agent
+- `/src run` is useful when you already know the report is actionable and want to skip the analyzer stage
+
 ### Headless Mode
 
 Run Strix programmatically without interactive UI using the `-n/--non-interactive` flag—perfect for servers and automated jobs. The CLI prints real-time vulnerability findings, and the final report before exiting. Exits with non-zero code when vulnerabilities are found.
