@@ -3,16 +3,28 @@ import json
 from typing import Any
 
 from strix.agents.base_agent import BaseAgent
+from strix.config import Config
 from strix.llm.config import LLMConfig
 from strix.src_repro import (
     extract_summary_from_completion_report,
     parse_src_repro_task_message,
     run_src_repro_flow,
 )
+from strix.src_verify import run_src_verify_flow
 
 
 class StrixAgent(BaseAgent):
     max_iterations = 300
+    _SRC_CHILD_AGENT_TIMEOUT_DISABLE_VALUES = {
+        "0",
+        "false",
+        "infinite",
+        "infinity",
+        "none",
+        "off",
+        "unlimited",
+    }
+    _SRC_EXECUTOR_SKILLS = {"repro_plan_executor", "verify_plan_executor"}
 
     def __init__(self, config: dict[str, Any]):
         default_skills = []
@@ -144,14 +156,23 @@ class StrixAgent(BaseAgent):
 
         self.state.update_context("last_handled_src_repro_message", src_task.original_message)
         self.state.update_context("last_src_repro_source_label", src_task.source_label)
+        self.state.update_context("last_src_repro_mode", src_task.mode)
         emit_message = lambda content: self._emit_src_repro_message(content, tracer)
+        command_label = "/src verify" if src_task.mode == "src_verification" else "/src"
 
         try:
-            result = await run_src_repro_flow(
-                src_task.original_message,
-                run_stage=self._run_src_repro_stage,
-                emit_message=emit_message,
-            )
+            if src_task.mode == "src_verification":
+                result = await run_src_verify_flow(
+                    src_task.original_message,
+                    run_stage=self._run_src_repro_stage,
+                    emit_message=emit_message,
+                )
+            else:
+                result = await run_src_repro_flow(
+                    src_task.original_message,
+                    run_stage=self._run_src_repro_stage,
+                    emit_message=emit_message,
+                )
         except (RuntimeError, TimeoutError, ValueError) as exc:
             failure_message = (
                 f"`/src` 编排失败，来源：`{src_task.source_label}`。\n"
@@ -159,8 +180,9 @@ class StrixAgent(BaseAgent):
             )
             emit_message(failure_message)
             return {
-                "mode": "src_reproduction",
+                "mode": src_task.mode,
                 "source_label": src_task.source_label,
+                "execution_stage": src_task.execution_stage,
                 "analysis": None,
                 "reproduction_plan": None,
                 "execution_report": None,
@@ -231,14 +253,18 @@ class StrixAgent(BaseAgent):
         child_state.update_context("src_repro_mode", True)
         child_state.update_context(
             "src_repro_stage",
-            "reproducer" if skill_name == "repro_plan_executor" else "analyzer",
+            "reproducer" if skill_name in self._SRC_EXECUTOR_SKILLS else "analyzer",
         )
         child_state.update_context(
             "src_repro_source_label",
             self.state.context.get("last_src_repro_source_label", "inline"),
         )
+        child_state.update_context(
+            "src_repro_workflow_mode",
+            self.state.context.get("last_src_repro_mode", "src_reproduction"),
+        )
 
-        if skill_name == "repro_plan_executor":
+        if skill_name in self._SRC_EXECUTOR_SKILLS:
             child_state.update_context("src_repro_plan_required", True)
             child_state.update_context("src_repro_plan_created", False)
 
@@ -252,10 +278,12 @@ class StrixAgent(BaseAgent):
             stop_agent,
         )
 
-        timeout_seconds = max(300, int(getattr(self.llm_config, "timeout", 300)) * 3)
-        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        timeout_seconds = self._get_src_child_agent_timeout_seconds()
+        deadline = None
+        if timeout_seconds is not None:
+            deadline = asyncio.get_running_loop().time() + timeout_seconds
 
-        while asyncio.get_running_loop().time() < deadline:
+        while deadline is None or asyncio.get_running_loop().time() < deadline:
             parent_messages = _agent_messages.get(self.state.agent_id, [])
             for message in parent_messages:
                 if message.get("from") != child_agent_id:
@@ -277,6 +305,29 @@ class StrixAgent(BaseAgent):
 
         stop_agent(child_agent_id)
         raise TimeoutError(f"/src child agent {child_agent_id} timed out")
+
+    def _get_src_child_agent_timeout_seconds(self) -> int | None:
+        configured_timeout = (Config.get("strix_src_child_agent_timeout") or "").strip()
+        if configured_timeout:
+            normalized = configured_timeout.lower()
+            if normalized in self._SRC_CHILD_AGENT_TIMEOUT_DISABLE_VALUES:
+                return None
+
+            try:
+                timeout_seconds = int(configured_timeout)
+            except ValueError as exc:
+                raise ValueError(
+                    "Invalid STRIX_SRC_CHILD_AGENT_TIMEOUT value: "
+                    f"{configured_timeout!r}. Use a positive integer number of seconds, "
+                    "or set it to 0/none/off/unlimited for no timeout."
+                ) from exc
+
+            if timeout_seconds <= 0:
+                return None
+
+            return timeout_seconds
+
+        return max(300, int(getattr(self.llm_config, "timeout", 300)) * 3)
 
     def _emit_src_repro_message(self, content: str, tracer: Any | None) -> None:
         self.state.add_message("assistant", content)
@@ -319,7 +370,7 @@ class StrixAgent(BaseAgent):
             analysis_json=analysis_json,
             reproduction_plan=result.get("reproduction_plan"),
             execution_trace=result.get("execution_report"),
-            final_verdict=result.get("final_summary"),
+            final_verdict=_compose_src_repro_persisted_verdict(result),
             source_label=task.source_label,
         )
 
@@ -331,3 +382,13 @@ class StrixAgent(BaseAgent):
             )
 
         return tool_result
+
+
+def _compose_src_repro_persisted_verdict(result: dict[str, Any]) -> str:
+    verdict = str(result.get("final_verdict") or "").strip()
+    summary = str(result.get("final_summary") or "").strip()
+    if verdict and summary:
+        return f"verdict: {verdict}\n{summary}"
+    if verdict:
+        return f"verdict: {verdict}"
+    return summary

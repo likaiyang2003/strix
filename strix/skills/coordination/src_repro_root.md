@@ -73,10 +73,10 @@ description: 串行执行基于漏洞报告的 /src 编排流程，按 analyzer 
 
 - 使用 `analysis_json` 作为前提参考，但不得重判 `can_reproduce`
 - 使用 `report_text` 作为执行输入，而不是依赖独立 planner 产物
-- 先调用 `create_src_repro_plan` 创建 `/src` 专用步骤合同，再输出 `Execution Todo`
+- 先调用 `create_src_plan` 创建 `/src` 专用步骤合同，再输出 `Execution Todo`
 - 再按步骤合同执行，使用当前 Strix 已有 browser / proxy / terminal / python / agents graph 能力
-- 在 `create_src_repro_plan` 完成前，不得先调用执行型工具
-- 执行中应使用 `get_src_repro_plan` / `update_src_repro_plan_step` 维护步骤状态
+- 在 `create_src_plan` 完成前，不得先调用执行型工具
+- 执行中应使用 `get_src_plan` / `update_src_plan_step` 维护步骤状态
 - 在 `/src` reproducer 中不得使用通用 `todo` 工具
 - 必须把完整执行报告写入 `agent_finish.result_summary`
 

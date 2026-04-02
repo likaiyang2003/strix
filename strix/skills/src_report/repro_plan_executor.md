@@ -43,9 +43,9 @@ description: 直接阅读 /src 原始漏洞报告，先创建专用复现步骤�
 
 ## 先做 `/src` 步骤合同，再执行
 
-在开始任何执行型工具调用之前，你必须先调用 `create_src_repro_plan`。
+在开始任何执行型工具调用之前，你必须先调用 `create_src_plan`。
 
-只有在 `create_src_repro_plan` 成功返回后，才允许进入真正执行。
+只有在 `create_src_plan` 成功返回后，才允许进入真正执行。
 
 这里的“执行型工具”包括：
 
@@ -58,11 +58,11 @@ description: 直接阅读 /src 原始漏洞报告，先创建专用复现步骤�
 - `terminal_execute`
 - `create_agent`
 
-在 `create_src_repro_plan` 完成之后，你还必须：
+在 `create_src_plan` 完成之后，你还必须：
 
 - 优先把第一个待执行步骤标记为 `in_progress`
-- 每完成一个步骤就调用 `update_src_repro_plan_step`
-- 如需确认当前顺序、字段或状态，可调用 `get_src_repro_plan`
+- 每完成一个步骤就调用 `update_src_plan_step`
+- 如需确认当前顺序、字段或状态，可调用 `get_src_plan`
 
 不得只在自然语言里口头写步骤，却不真正调用 `/src` 专用步骤工具。
 不得在 `/src` reproducer 中使用通用 `todo` 工具。
@@ -441,7 +441,7 @@ description: 直接阅读 /src 原始漏洞报告，先创建专用复现步骤�
 
 对 `/src` 步骤工具也必须记录：
 
-- 是否调用了 `create_src_repro_plan`
+- 是否调用了 `create_src_plan`
 - 创建了哪些步骤
 - 哪些步骤被标记为 `in_progress`
 - 哪些步骤被标记为 `done` / `blocked`

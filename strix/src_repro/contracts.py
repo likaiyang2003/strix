@@ -16,9 +16,11 @@ class SrcReproAnalysis:
 class SrcReproTask:
     report_text: str
     source_label: str
+    mode: str = "src_reproduction"
     requested_root_skill: str = "src_repro_root"
     original_message: str = ""
     skip_analysis: bool = False
+    execution_stage: str = "reproduction"
 
 
 def _generate_bundle_id() -> str:

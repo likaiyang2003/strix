@@ -16,7 +16,7 @@ def test_src_repro_gate_blocks_execution_before_plan_created() -> None:
     error = _validate_src_repro_tool_gate("send_request", agent_state)
 
     assert error is not None
-    assert "create_src_repro_plan" in error
+    assert "create_src_plan" in error
 
 
 def test_src_repro_gate_blocks_legacy_todo_tools() -> None:

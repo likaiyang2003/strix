@@ -32,15 +32,16 @@ def parse_src_repro_task_message(message: str) -> SrcReproTask | None:
         return None
 
     mode = (root.findtext("mode") or "").strip()
-    if mode != "src_reproduction":
+    if mode not in {"src_reproduction", "src_verification"}:
         return None
 
     report_text = (root.findtext("report_text") or "").strip()
     source_label = (root.findtext("source_label") or "inline").strip() or "inline"
+    execution_stage = (root.findtext("execution_stage") or "reproduction").strip().lower() or "reproduction"
     analysis_mode = (root.findtext("analysis_mode") or "full").strip().lower() or "full"
-    requested_root_skill = (
-        (root.findtext("requested_root_skill") or "src_repro_root").strip() or "src_repro_root"
-    )
+    requested_root_skill = (root.findtext("requested_root_skill") or "").strip()
+    if not requested_root_skill:
+        requested_root_skill = "src_verify_root" if mode == "src_verification" else "src_repro_root"
 
     if not report_text:
         return None
@@ -48,9 +49,11 @@ def parse_src_repro_task_message(message: str) -> SrcReproTask | None:
     return SrcReproTask(
         report_text=report_text,
         source_label=source_label,
+        mode=mode,
         requested_root_skill=requested_root_skill,
         original_message=message,
         skip_analysis=analysis_mode == "skip",
+        execution_stage=execution_stage,
     )
 
 
@@ -69,8 +72,10 @@ def extract_summary_from_completion_report(message: str) -> str | None:
 def build_analyzer_task(task: SrcReproTask) -> str:
     report_text = _wrap_cdata(trim_for_analysis(task.report_text))
     source_label = escape(task.source_label)
+    execution_stage = escape(task.execution_stage)
     return (
         "<src_repro_analyzer_task>\n"
+        f"  <execution_stage>{execution_stage}</execution_stage>\n"
         f"  <source_label>{source_label}</source_label>\n"
         "  <instructions>\n"
         "    只分析该报告当前是否具备可复现前提。\n"
@@ -87,14 +92,16 @@ def build_reproducer_task(task: SrcReproTask, analysis: SrcReproAnalysis) -> str
     analysis_json = _wrap_cdata(json.dumps(asdict(analysis), ensure_ascii=False, indent=2))
     report_text = _wrap_cdata(trim_for_reproduction(task.report_text))
     source_label = escape(task.source_label)
+    execution_stage = escape(task.execution_stage)
     return (
         "<src_repro_reproducer_task>\n"
+        f"  <execution_stage>{execution_stage}</execution_stage>\n"
         f"  <source_label>{source_label}</source_label>\n"
         "  <instructions>\n"
         "    你是 `/src` 复现执行器。\n"
         "    必须尊重 analyzer 结论，但不要重新判断 can_reproduce。\n"
-        "    先阅读 report_text，并且必须先调用 `create_src_repro_plan` 创建一份简短、原子化、可执行的 `/src` 专用步骤合同。\n"
-        "    在 `create_src_repro_plan` 完成之前，不得先调用 `send_request`、`repeat_request`、`list_requests`、`view_request`、`browser_action`、`python_action` 或 `terminal_execute`。\n"
+        "    先阅读 report_text，并且必须先调用 `create_src_plan` 创建一份简短、原子化、可执行的 `/src` 专用步骤合同。\n"
+        "    在 `create_src_plan` 完成之前，不得先调用 `send_request`、`repeat_request`、`list_requests`、`view_request`、`browser_action`、`python_action` 或 `terminal_execute`。\n"
         "    如果报告属于 `ui_navigation + packet_replay` 联合场景，不得默认用裸 `send_request` 作为第一条主路线。\n"
         "    当报告同时给出 UI 路径、普通会话上下文、以及页面端成功标志或渲染验证点时，优先规划为“先进入 UI 并生成当前会话中的真实请求，再决定是否查看或重放请求”。\n"
         "    如果历史抓包中的头、cookie、token、nonce、checksum、appsecret 只是证据，而不是当前明确可复用输入，则不要把它们直接当作当前放包模板。\n"
@@ -113,7 +120,7 @@ def build_reproducer_task(task: SrcReproTask, analysis: SrcReproAnalysis) -> str
         "    然后严格按这份步骤合同执行，并基于真实执行结果给出最终 verdict。\n"
         "    所有自然语言输出必须使用中文。\n"
         "    不得 broad recon，不得扩展攻击面，不得把任务改造成通用扫描。\n"
-        "    执行过程中应使用 `get_src_repro_plan` 或 `update_src_repro_plan_step` 维护步骤状态，而不是只在自然语言里口头描述计划。\n"
+        "    执行过程中应使用 `get_src_plan` 或 `update_src_plan_step` 维护步骤状态，而不是只在自然语言里口头描述计划。\n"
         "    在 `/src` reproducer 中不得使用通用 `todo` 工具。\n"
         "    必须把完整执行报告写入 agent_finish.result_summary。\n"
         "    输出必须按以下四个部分组织：\n"
@@ -166,6 +173,7 @@ async def run_src_repro_flow(
             return {
                 "mode": "src_reproduction",
                 "source_label": task.source_label,
+                "execution_stage": task.execution_stage,
                 "analysis": asdict(analysis),
                 "reproduction_plan": None,
                 "execution_report": None,
@@ -186,6 +194,7 @@ async def run_src_repro_flow(
     return {
         "mode": "src_reproduction",
         "source_label": task.source_label,
+        "execution_stage": task.execution_stage,
         "analysis": asdict(analysis),
         "reproduction_plan": reproduction_plan,
         "execution_report": execution_report,

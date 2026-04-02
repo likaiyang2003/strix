@@ -32,10 +32,11 @@ from textual.widgets.tree import TreeNode
 from strix.agents.StrixAgent import StrixAgent
 from strix.interface.slash_commands import (
     SlashCommandError,
-    build_src_dispatch,
+    build_src_task_message,
     complete_src_report_reference,
     is_slash_command,
     list_src_report_suggestions,
+    parse_src_command,
 )
 from strix.interface.streaming_parser import parse_streaming_content
 from strix.interface.tool_components.agent_message_renderer import AgentMessageRenderer
@@ -1487,9 +1488,9 @@ class StrixTUIApp(App):  # type: ignore[misc]
             tool_data = self.tracer.tool_executions[exec_id]
             tool_name = str(tool_data.get("tool_name") or "")
             if tool_name not in {
-                "create_src_repro_plan",
-                "get_src_repro_plan",
-                "update_src_repro_plan_step",
+                "create_src_plan",
+                "get_src_plan",
+                "update_src_plan_step",
             }:
                 continue
 
@@ -1501,7 +1502,7 @@ class StrixTUIApp(App):  # type: ignore[misc]
             if not isinstance(result, dict):
                 continue
 
-            if tool_name in {"create_src_repro_plan", "get_src_repro_plan"}:
+            if tool_name in {"create_src_plan", "get_src_plan"}:
                 plan = result.get("plan")
                 if isinstance(plan, dict):
                     plan_snapshots[agent_id] = deepcopy(plan)
@@ -1516,7 +1517,7 @@ class StrixTUIApp(App):  # type: ignore[misc]
                 agent_id,
                 {
                     "plan_id": str(result.get("plan_id") or ""),
-                    "title": str(result.get("title") or "SRC Repro Plan"),
+                    "title": str(result.get("title") or "SRC Plan"),
                     "source_label": str(result.get("source_label") or ""),
                     "updated_at": str(
                         result.get("plan_updated_at")
@@ -1595,7 +1596,7 @@ class StrixTUIApp(App):  # type: ignore[misc]
         text = Text()
         text.append("SRC 状态", style="bold #22c55e")
 
-        title = str(plan.get("title") or "SRC Repro Plan").strip() or "SRC Repro Plan"
+        title = str(plan.get("title") or "SRC Plan").strip() or "SRC Plan"
         source_label = str(plan.get("source_label") or "").strip()
         steps = plan.get("steps")
         normalized_steps = [step for step in steps if isinstance(step, dict)] if isinstance(steps, list) else []
@@ -2159,6 +2160,10 @@ class StrixTUIApp(App):  # type: ignore[misc]
             return
 
         node = event.node
+        if node.data:
+            agent_id = node.data.get("agent_id")
+            if agent_id:
+                self.selected_agent_id = agent_id
 
         if node.allow_expand:
             if node.is_expanded:
@@ -2198,24 +2203,23 @@ class StrixTUIApp(App):  # type: ignore[misc]
             return True
 
         root_agent_id = get_root_agent_id()
-        if root_agent_id:
-            load_result = load_skills_into_agent(root_agent_id, ["src_repro_root"])
-            if not load_result.get("success"):
-                logging.warning(
-                    "Failed to preload /src root skill into agent %s: %s",
-                    root_agent_id,
-                    load_result.get("error", "unknown error"),
-                )
-
         try:
-            root_agent_id, structured_message = build_src_dispatch(
-                stripped,
-                root_agent_id=root_agent_id,
-            )
+            request = parse_src_command(stripped)
+            if not root_agent_id:
+                raise SlashCommandError("Cannot dispatch /src command because no root agent is available.")
+            structured_message = build_src_task_message(request)
         except SlashCommandError as e:
             logging.warning(f"Failed to parse /src command: {e}")
             self._show_slash_command_error(str(e), agent_id=root_agent_id)
             return True
+
+        load_result = load_skills_into_agent(root_agent_id, [request.requested_root_skill])
+        if not load_result.get("success"):
+            logging.warning(
+                "Failed to preload /src root skill into agent %s: %s",
+                root_agent_id,
+                load_result.get("error", "unknown error"),
+            )
 
         self.selected_agent_id = root_agent_id
         self._send_message_to_agent(root_agent_id, structured_message)
@@ -2237,8 +2241,37 @@ class StrixTUIApp(App):  # type: ignore[misc]
         self._update_chat_view()
         self.notify(message, timeout=4)
 
+    def _should_interrupt_agent_on_user_message(self, agent_id: str) -> bool:
+        try:
+            from strix.tools.agents_graph.agents_graph_actions import (
+                get_agent_instance,
+                get_root_agent_id,
+            )
+
+            agent_instance = get_agent_instance(agent_id)
+            if agent_instance is not None and hasattr(agent_instance, "state"):
+                return getattr(agent_instance.state, "parent_id", None) is None
+
+            root_agent_id = get_root_agent_id()
+            if root_agent_id:
+                return agent_id == root_agent_id
+        except (ImportError, AttributeError, KeyError):
+            pass
+
+        try:
+            if self.tracer and agent_id in self.tracer.agents:
+                parent_id = self.tracer.agents[agent_id].get("parent_id")
+                return not parent_id
+        except (AttributeError, KeyError, TypeError):
+            pass
+
+        return False
+
     def _send_message_to_agent(self, agent_id: str, message: str) -> None:
-        self._cancel_agent_execution(agent_id)
+        # Root-agent follow-ups act like an interrupt, but sub-agent updates
+        # should stay in that agent's queue without force-stopping execution.
+        if self._should_interrupt_agent_on_user_message(agent_id):
+            self._cancel_agent_execution(agent_id)
 
         if self.tracer:
             self.tracer.log_chat_message(

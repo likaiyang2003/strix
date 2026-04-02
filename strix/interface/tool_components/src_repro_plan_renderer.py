@@ -149,7 +149,6 @@ def _append_compact_step_line(text: Text, step: dict[str, Any]) -> None:
 
 def _render_error_widget(title_label: str, status: str, message: str) -> Static:
     text = Text()
-    text.append("SRC ", style="bold #22c55e")
     text.append(title_label, style="bold #22c55e")
     text.append("\n  ")
     text.append(message, style="#ef4444")
@@ -158,7 +157,6 @@ def _render_error_widget(title_label: str, status: str, message: str) -> Static:
 
 def _render_pending_widget(title_label: str, status: str, message: str = "处理中...") -> Static:
     text = Text()
-    text.append("SRC ", style="bold #22c55e")
     text.append(title_label, style="bold #22c55e")
     text.append("\n  ")
     text.append(message, style="dim")
@@ -178,13 +176,12 @@ def _render_full_plan_widget(title_label: str, tool_data: dict[str, Any]) -> Sta
 
     plan = _extract_plan(result)
     if not plan:
-        return _render_pending_widget(title_label, status, "当前没有可展示的 `/src` 复现步骤合同。")
+        return _render_pending_widget(title_label, status, "当前没有可展示的 `/src` 步骤合同。")
 
     text = Text()
-    text.append("SRC ", style="bold #22c55e")
     text.append(title_label, style="bold #22c55e")
 
-    plan_title = str(plan.get("title") or "SRC Repro Plan").strip() or "SRC Repro Plan"
+    plan_title = str(plan.get("title") or "SRC Plan").strip() or "SRC Plan"
     source_label = str(plan.get("source_label") or "").strip()
 
     text.append("\n  ")
@@ -220,13 +217,12 @@ def _render_plan_snapshot_widget(title_label: str, tool_data: dict[str, Any]) ->
 
     plan = _extract_plan(result)
     if not plan:
-        return _render_pending_widget(title_label, status, "当前没有可展示的 `/src` 复现步骤合同。")
+        return _render_pending_widget(title_label, status, "当前没有可展示的 `/src` 步骤合同。")
 
     text = Text()
-    text.append("SRC ", style="bold #22c55e")
     text.append(title_label, style="bold #22c55e")
 
-    plan_title = str(plan.get("title") or "SRC Repro Plan").strip() or "SRC Repro Plan"
+    plan_title = str(plan.get("title") or "SRC Plan").strip() or "SRC Plan"
     source_label = str(plan.get("source_label") or "").strip()
 
     text.append("\n  ")
@@ -258,7 +254,6 @@ def _render_plan_delta_widget(title_label: str, tool_data: dict[str, Any]) -> St
         return _render_error_widget(title_label, status, str(result.get("error") or "操作失败"))
 
     text = Text()
-    text.append("SRC ", style="bold #22c55e")
     text.append(title_label, style="bold #22c55e")
 
     updated_count = int(result.get("updated_count") or 0)
@@ -295,29 +290,29 @@ def _render_plan_delta_widget(title_label: str, tool_data: dict[str, Any]) -> St
 
 @register_tool_renderer
 class CreateSrcReproPlanRenderer(BaseToolRenderer):
-    tool_name: ClassVar[str] = "create_src_repro_plan"
+    tool_name: ClassVar[str] = "create_src_plan"
     css_classes: ClassVar[list[str]] = ["tool-call", "src-repro-plan-tool"]
 
     @classmethod
     def render(cls, tool_data: dict[str, Any]) -> Static:
-        return _render_full_plan_widget("Repro Plan", tool_data)
+        return _render_full_plan_widget(cls.tool_name, tool_data)
 
 
 @register_tool_renderer
 class GetSrcReproPlanRenderer(BaseToolRenderer):
-    tool_name: ClassVar[str] = "get_src_repro_plan"
+    tool_name: ClassVar[str] = "get_src_plan"
     css_classes: ClassVar[list[str]] = ["tool-call", "src-repro-plan-tool"]
 
     @classmethod
     def render(cls, tool_data: dict[str, Any]) -> Static:
-        return _render_plan_snapshot_widget("Repro Snapshot", tool_data)
+        return _render_plan_snapshot_widget(cls.tool_name, tool_data)
 
 
 @register_tool_renderer
 class UpdateSrcReproPlanStepRenderer(BaseToolRenderer):
-    tool_name: ClassVar[str] = "update_src_repro_plan_step"
+    tool_name: ClassVar[str] = "update_src_plan_step"
     css_classes: ClassVar[list[str]] = ["tool-call", "src-repro-plan-tool"]
 
     @classmethod
     def render(cls, tool_data: dict[str, Any]) -> Static:
-        return _render_plan_delta_widget("Repro Update", tool_data)
+        return _render_plan_delta_widget(cls.tool_name, tool_data)

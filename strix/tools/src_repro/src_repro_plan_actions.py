@@ -195,7 +195,7 @@ def _build_plan_response(plan: dict[str, Any]) -> dict[str, Any]:
     return {
         "success": True,
         "plan_id": plan_snapshot["plan_id"],
-        "title": plan_snapshot.get("title") or "SRC Repro Plan",
+        "title": plan_snapshot.get("title") or "SRC Plan",
         "source_label": plan_snapshot.get("source_label") or "inline",
         "plan": plan_snapshot,
         "summary": _build_summary(plan_snapshot),
@@ -235,7 +235,7 @@ def _build_plan_delta_response(
     response: dict[str, Any] = {
         "success": not bool(errors),
         "plan_id": str(plan.get("plan_id") or ""),
-        "title": str(plan.get("title") or "SRC Repro Plan"),
+        "title": str(plan.get("title") or "SRC Plan"),
         "source_label": str(plan.get("source_label") or "inline"),
         "summary": _build_summary(plan),
         "updated": list(updated),
@@ -346,7 +346,7 @@ def _apply_step_update(
 
 
 @register_tool(sandbox_execution=False)
-def create_src_repro_plan(
+def create_src_plan(
     agent_state: Any,
     steps: Any,
     title: str | None = None,
@@ -360,7 +360,7 @@ def create_src_repro_plan(
             return {
                 "success": False,
                 "error": (
-                    "当前 agent 已存在 `/src` 复现步骤合同。"
+                    "当前 agent 已存在 `/src` 步骤合同。"
                     "如需重建，请显式传入 replace=true。"
                 ),
             }
@@ -371,7 +371,7 @@ def create_src_repro_plan(
             "plan_id": str(
                 existing.get("plan_id") if existing and replace else f"srcplan_{uuid.uuid4().hex[:8]}"
             ),
-            "title": (title or "").strip() or "SRC Repro Plan",
+            "title": (title or "").strip() or "SRC Plan",
             "source_label": (
                 source_label or agent_state.context.get("src_repro_source_label") or "inline"
             ).strip()
@@ -383,24 +383,24 @@ def create_src_repro_plan(
         _src_repro_plan_storage[agent_id] = plan
         _sync_plan_context(agent_state, plan)
     except (TypeError, ValueError) as exc:
-        return {"success": False, "error": f"创建 `/src` 复现步骤合同失败：{exc}"}
+        return {"success": False, "error": f"创建 `/src` 步骤合同失败：{exc}"}
     else:
         return _build_plan_response(plan)
 
 
 @register_tool(sandbox_execution=False)
-def get_src_repro_plan(agent_state: Any) -> dict[str, Any]:
+def get_src_plan(agent_state: Any) -> dict[str, Any]:
     plan = _get_agent_plan(agent_state.agent_id)
     if plan is None:
         return {
             "success": False,
-            "error": "当前 agent 还没有 `/src` 复现步骤合同。",
+            "error": "当前 agent 还没有 `/src` 步骤合同。",
         }
     return _build_plan_response(plan)
 
 
 @register_tool(sandbox_execution=False)
-def update_src_repro_plan_step(
+def update_src_plan_step(
     agent_state: Any,
     step_id: str | None = None,
     status: str | None = None,
@@ -415,7 +415,7 @@ def update_src_repro_plan_step(
         if plan is None:
             return {
                 "success": False,
-                "error": "当前 agent 还没有 `/src` 复现步骤合同，无法更新步骤。",
+                "error": "当前 agent 还没有 `/src` 步骤合同，无法更新步骤。",
             }
 
         step_updates = _normalize_bulk_step_updates(updates)
@@ -467,14 +467,14 @@ def update_src_repro_plan_step(
         _sync_plan_context(agent_state, plan)
         response = _build_plan_delta_response(plan, updated=updated, errors=errors)
     except (TypeError, ValueError) as exc:
-        return {"success": False, "error": f"更新 `/src` 复现步骤失败：{exc}"}
+        return {"success": False, "error": f"更新 `/src` 步骤失败：{exc}"}
     else:
         return response
 
 
 __all__ = [
     "VALID_SRC_REPRO_STEP_STATUSES",
-    "create_src_repro_plan",
-    "get_src_repro_plan",
-    "update_src_repro_plan_step",
+    "create_src_plan",
+    "get_src_plan",
+    "update_src_plan_step",
 ]

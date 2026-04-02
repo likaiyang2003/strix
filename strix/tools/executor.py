@@ -26,9 +26,9 @@ SANDBOX_EXECUTION_TIMEOUT = _SERVER_TIMEOUT + 30
 SANDBOX_CONNECT_TIMEOUT = float(Config.get("strix_sandbox_connect_timeout") or "10")
 
 SRC_REPRO_PLAN_TOOLS = {
-    "create_src_repro_plan",
-    "get_src_repro_plan",
-    "update_src_repro_plan_step",
+    "create_src_plan",
+    "get_src_plan",
+    "update_src_plan_step",
 }
 SRC_REPRO_LEGACY_TODO_TOOLS = {
     "create_todo",
@@ -50,8 +50,8 @@ SRC_REPRO_EXECUTION_TOOLS = {
 }
 SRC_REPRO_ALWAYS_ALLOWED_TOOLS = {
     "agent_finish",
-    "get_src_repro_plan",
-    "update_src_repro_plan_step",
+    "get_src_plan",
+    "update_src_plan_step",
     "view_agent_graph",
     "wait_for_message",
 }
@@ -160,12 +160,12 @@ def _validate_src_repro_tool_gate(tool_name: str, agent_state: Any | None) -> st
 
     if tool_name in SRC_REPRO_LEGACY_TODO_TOOLS:
         return (
-            "在 `/src` reproducer 中禁止使用通用 todo 工具。"
-            "请改用 `create_src_repro_plan`、`get_src_repro_plan`、`update_src_repro_plan_step`。"
+            "在 `/src` 执行阶段中禁止使用通用 todo 工具。"
+            "请改用 `create_src_plan`、`get_src_plan`、`update_src_plan_step`。"
         )
 
     if tool_name == "create_agent":
-        return "在 `/src` reproducer 中禁止创建额外子 agent，请直接按当前步骤合同执行。"
+        return "在 `/src` 执行阶段中禁止创建额外子 agent，请直接按当前步骤合同执行。"
 
     plan_created = bool(context.get("src_repro_plan_created"))
     if plan_created:
@@ -176,8 +176,8 @@ def _validate_src_repro_tool_gate(tool_name: str, agent_state: Any | None) -> st
 
     if tool_name in SRC_REPRO_EXECUTION_TOOLS:
         return (
-            "当前 `/src` reproducer 还没有创建步骤合同。"
-            "在调用执行型工具之前，必须先调用 `create_src_repro_plan`。"
+            "当前 `/src` 执行阶段还没有创建步骤合同。"
+            "在调用执行型工具之前，必须先调用 `create_src_plan`。"
         )
 
     return None

@@ -52,6 +52,47 @@ def test_wait_for_src_repro_stage_summary_consumes_completion_report() -> None:
         graph["edges"].extend(original_graph["edges"])
 
 
+def test_get_src_child_agent_timeout_seconds_uses_env_override(monkeypatch) -> None:
+    agent = StrixAgent.__new__(StrixAgent)
+    agent.llm_config = type("DummyConfig", (), {"timeout": 5})()
+
+    monkeypatch.setenv("STRIX_SRC_CHILD_AGENT_TIMEOUT", "1800")
+
+    assert agent._get_src_child_agent_timeout_seconds() == 1800
+
+
+def test_get_src_child_agent_timeout_seconds_supports_unlimited(monkeypatch) -> None:
+    agent = StrixAgent.__new__(StrixAgent)
+    agent.llm_config = type("DummyConfig", (), {"timeout": 5})()
+
+    monkeypatch.setenv("STRIX_SRC_CHILD_AGENT_TIMEOUT", "0")
+
+    assert agent._get_src_child_agent_timeout_seconds() is None
+
+
+def test_get_src_child_agent_timeout_seconds_falls_back_to_default(monkeypatch) -> None:
+    agent = StrixAgent.__new__(StrixAgent)
+    agent.llm_config = type("DummyConfig", (), {"timeout": 5})()
+
+    monkeypatch.delenv("STRIX_SRC_CHILD_AGENT_TIMEOUT", raising=False)
+
+    assert agent._get_src_child_agent_timeout_seconds() == 300
+
+
+def test_get_src_child_agent_timeout_seconds_rejects_invalid_env(monkeypatch) -> None:
+    agent = StrixAgent.__new__(StrixAgent)
+    agent.llm_config = type("DummyConfig", (), {"timeout": 5})()
+
+    monkeypatch.setenv("STRIX_SRC_CHILD_AGENT_TIMEOUT", "abc")
+
+    try:
+        agent._get_src_child_agent_timeout_seconds()
+    except ValueError as exc:
+        assert "STRIX_SRC_CHILD_AGENT_TIMEOUT" in str(exc)
+    else:
+        raise AssertionError("Expected invalid STRIX_SRC_CHILD_AGENT_TIMEOUT to raise ValueError")
+
+
 def test_persist_src_repro_bundle_logs_tool_result(monkeypatch) -> None:
     class _DummyTracer:
         def __init__(self) -> None:
@@ -99,6 +140,7 @@ def test_configure_src_repro_stage_agent_marks_reproducer_state() -> None:
     agent = StrixAgent.__new__(StrixAgent)
     agent.state = AgentState(agent_id="root-agent", agent_name="Root Agent", parent_id=None)
     agent.state.update_context("last_src_repro_source_label", "inline")
+    agent.state.update_context("last_src_repro_mode", "src_verification")
 
     child_state = AgentState(agent_id="child-agent", agent_name="SRC Reproducer", parent_id="root-agent")
     graph = agents_graph_actions.__dict__["_agent_graph"]
@@ -116,6 +158,38 @@ def test_configure_src_repro_stage_agent_marks_reproducer_state() -> None:
         assert child_state.context["src_repro_plan_required"] is True
         assert child_state.context["src_repro_plan_created"] is False
         assert child_state.context["src_repro_source_label"] == "inline"
+        assert child_state.context["src_repro_workflow_mode"] == "src_verification"
+        assert graph["nodes"]["child-agent"]["state"]["context"]["src_repro_plan_required"] is True
+    finally:
+        graph["nodes"].clear()
+        graph["nodes"].update(original_nodes)
+        states.clear()
+        states.update(original_states)
+
+
+def test_configure_src_repro_stage_agent_marks_verify_executor_state() -> None:
+    agent = StrixAgent.__new__(StrixAgent)
+    agent.state = AgentState(agent_id="root-agent", agent_name="Root Agent", parent_id=None)
+    agent.state.update_context("last_src_repro_source_label", "inline")
+    agent.state.update_context("last_src_repro_mode", "src_verification")
+
+    child_state = AgentState(agent_id="child-agent", agent_name="SRC Verify Executor", parent_id="root-agent")
+    graph = agents_graph_actions.__dict__["_agent_graph"]
+    states = agents_graph_actions.__dict__["_agent_states"]
+    original_nodes = dict(graph["nodes"])
+    original_states = dict(states)
+
+    try:
+        graph["nodes"]["child-agent"] = {"state": {}}
+        states["child-agent"] = child_state
+
+        agent._configure_src_repro_stage_agent("child-agent", "verify_plan_executor")
+
+        assert child_state.context["src_repro_stage"] == "reproducer"
+        assert child_state.context["src_repro_plan_required"] is True
+        assert child_state.context["src_repro_plan_created"] is False
+        assert child_state.context["src_repro_source_label"] == "inline"
+        assert child_state.context["src_repro_workflow_mode"] == "src_verification"
         assert graph["nodes"]["child-agent"]["state"]["context"]["src_repro_plan_required"] is True
     finally:
         graph["nodes"].clear()

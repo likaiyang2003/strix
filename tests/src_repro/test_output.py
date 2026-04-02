@@ -65,3 +65,19 @@ def test_save_src_repro_bundle_requires_tracer() -> None:
         assert "get_run_dir" in str(exc)
     else:  # pragma: no cover - defensive
         raise AssertionError("Expected ValueError when tracer is missing")
+
+
+def test_save_src_repro_bundle_supports_verify_verdict_labels(tmp_path: Path) -> None:
+    tracer = _DummyTracer(tmp_path / "strix_runs" / "demo-run")
+    bundle = SrcReproBundle(
+        source_report="target=https://demo.local path=/admin",
+        source_label="inline",
+        final_verdict="verdict: fixed\n修复已验证",
+        bundle_id="src-verify-fixed",
+    )
+
+    saved = save_src_repro_bundle(tracer, bundle)
+
+    manifest = json.loads(Path(saved["files"]["manifest"]).read_text(encoding="utf-8"))
+    assert manifest["bundle_id"] == "src-verify-fixed"
+    assert manifest["final_verdict"] == "fixed"

@@ -18,7 +18,7 @@ def test_render_tool_content_simple_supports_src_repro_plan_renderer() -> None:
 
     result = app._render_tool_content_simple(
         {
-            "tool_name": "create_src_repro_plan",
+            "tool_name": "create_src_plan",
             "args": {},
             "status": "completed",
             "result": {
@@ -61,6 +61,7 @@ def test_render_tool_content_simple_supports_src_repro_plan_renderer() -> None:
     )
 
     assert isinstance(result, Text)
+    assert "create_src_plan" in result.plain
     assert "Demo Plan" in result.plain
     assert "S1 打开首页" in result.plain
     assert "检查代理流量" in result.plain
@@ -78,7 +79,7 @@ def test_render_tool_content_simple_renders_src_repro_update_as_delta() -> None:
 
     result = app._render_tool_content_simple(
         {
-            "tool_name": "update_src_repro_plan_step",
+            "tool_name": "update_src_plan_step",
             "args": {},
             "status": "completed",
             "result": {
@@ -109,6 +110,7 @@ def test_render_tool_content_simple_renders_src_repro_update_as_delta() -> None:
     )
 
     assert isinstance(result, Text)
+    assert "update_src_plan_step" in result.plain
     assert "已更新 1 步" in result.plain
     assert "S2 检查代理流量" in result.plain
     assert "正在查看 POST 请求" in result.plain

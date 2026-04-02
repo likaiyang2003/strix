@@ -8,11 +8,13 @@ from strix.src_repro import (
     run_src_repro_flow,
 )
 from strix.src_repro.contracts import SrcReproAnalysis, SrcReproTask
+from strix.src_verify import run_src_verify_flow
 
 
 def test_parse_src_repro_task_message_reads_structured_payload() -> None:
     message = """<src_repro_task>
   <mode>src_reproduction</mode>
+  <execution_stage>reproduction</execution_stage>
   <analysis_mode>full</analysis_mode>
   <requested_root_skill>src_repro_root</requested_root_skill>
   <source_label>inline</source_label>
@@ -26,11 +28,13 @@ def test_parse_src_repro_task_message_reads_structured_payload() -> None:
     assert task.source_label == "inline"
     assert task.requested_root_skill == "src_repro_root"
     assert task.skip_analysis is False
+    assert task.execution_stage == "reproduction"
 
 
 def test_parse_src_repro_task_message_reads_skip_analysis_mode() -> None:
     message = """<src_repro_task>
   <mode>src_reproduction</mode>
+  <execution_stage>reproduction</execution_stage>
   <analysis_mode>skip</analysis_mode>
   <requested_root_skill>src_repro_root</requested_root_skill>
   <source_label>inline</source_label>
@@ -41,6 +45,25 @@ def test_parse_src_repro_task_message_reads_skip_analysis_mode() -> None:
 
     assert task is not None
     assert task.skip_analysis is True
+    assert task.execution_stage == "reproduction"
+
+
+def test_parse_src_repro_task_message_reads_verify_execution_stage() -> None:
+    message = """<src_repro_task>
+  <mode>src_verification</mode>
+  <execution_stage>verify</execution_stage>
+  <analysis_mode>full</analysis_mode>
+  <requested_root_skill>src_verify_root</requested_root_skill>
+  <source_label>inline</source_label>
+  <report_text><![CDATA[target=https://demo.local path=/admin]]></report_text>
+</src_repro_task>"""
+
+    task = parse_src_repro_task_message(message)
+
+    assert task is not None
+    assert task.mode == "src_verification"
+    assert task.requested_root_skill == "src_verify_root"
+    assert task.execution_stage == "verify"
 
 
 def test_extract_summary_from_completion_report_returns_summary_block() -> None:
@@ -80,13 +103,14 @@ def test_build_reproducer_task_embeds_report_text_only() -> None:
     rendered = build_reproducer_task(task, analysis)
 
     assert "<src_repro_reproducer_task>" in rendered
+    assert "<execution_stage>reproduction</execution_stage>" in rendered
     assert "<report_text><![CDATA[" in rendered
     assert "report body" in rendered
     assert "## 1) Execution Todo" in rendered
     assert "<analysis_json><![CDATA[" in rendered
-    assert "create_src_repro_plan" in rendered
-    assert "update_src_repro_plan_step" in rendered
-    assert "get_src_repro_plan" in rendered
+    assert "create_src_plan" in rendered
+    assert "update_src_plan_step" in rendered
+    assert "get_src_plan" in rendered
     assert "不得默认用裸 `send_request` 作为第一条主路线" in rendered
     assert "先进入 UI 并生成当前会话中的真实请求" in rendered
     assert "不要立刻结束整个任务，应继续走该有界分支" in rendered
@@ -111,6 +135,7 @@ def test_run_src_repro_flow_stops_after_analyzer_when_not_reproducible() -> None
     emitted_messages: list[str] = []
     raw_message = """<src_repro_task>
   <mode>src_reproduction</mode>
+  <execution_stage>reproduction</execution_stage>
   <analysis_mode>full</analysis_mode>
   <requested_root_skill>src_repro_root</requested_root_skill>
   <source_label>inline</source_label>
@@ -138,6 +163,7 @@ def test_run_src_repro_flow_stops_after_analyzer_when_not_reproducible() -> None
     assert result["analysis"]["can_reproduce"] is False
     assert result["reproduction_plan"] is None
     assert result["execution_report"] is None
+    assert result["execution_stage"] == "reproduction"
     assert result["final_verdict"] == "not reproducible"
     assert "/src" in emitted_messages[0]
     assert "analyzer" in emitted_messages[0]
@@ -149,6 +175,7 @@ def test_run_src_repro_flow_runs_analyzer_then_reproducer() -> None:
     emitted_messages: list[str] = []
     raw_message = """<src_repro_task>
   <mode>src_reproduction</mode>
+  <execution_stage>reproduction</execution_stage>
   <analysis_mode>full</analysis_mode>
   <requested_root_skill>src_repro_root</requested_root_skill>
   <source_label>report.txt</source_label>
@@ -186,6 +213,7 @@ def test_run_src_repro_flow_runs_analyzer_then_reproducer() -> None:
     ]
     assert result["analysis"]["can_reproduce"] is True
     assert result["reproduction_plan"].startswith("## 1) Execution Todo")
+    assert result["execution_stage"] == "reproduction"
     assert result["final_verdict"] == "reproducible"
     assert "reproducer" in emitted_messages[-2]
     assert emitted_messages[-1].startswith("`/src`")
@@ -196,6 +224,7 @@ def test_run_src_repro_flow_skips_analyzer_for_run_mode() -> None:
     emitted_messages: list[str] = []
     raw_message = """<src_repro_task>
   <mode>src_reproduction</mode>
+  <execution_stage>reproduction</execution_stage>
   <analysis_mode>skip</analysis_mode>
   <requested_root_skill>src_repro_root</requested_root_skill>
   <source_label>inline</source_label>
@@ -226,6 +255,7 @@ def test_run_src_repro_flow_skips_analyzer_for_run_mode() -> None:
 
     assert [call[0] for call in stage_calls] == ["SRC Reproducer"]
     assert result["analysis"]["can_reproduce"] is True
+    assert result["execution_stage"] == "reproduction"
     assert result["analysis"]["reason"] == "用户显式要求跳过分析，直接进入复现执行。"
     assert result["final_verdict"] == "blocked"
     assert "/src run" in emitted_messages[0]

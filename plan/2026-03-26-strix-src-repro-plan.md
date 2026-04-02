@@ -42,6 +42,7 @@
 - 原始报告二次回看
 - 缺口解析子 agent
 - 默认 broad recon / 默认扫描主链路
+- 修复后的正式回归验证工作流
 
 ## 3. 当前实现流程
 
@@ -92,9 +93,9 @@ Reproducer 直接读取 `report_text` 执行，不再接收 planner 产物。
 
 当前要求它：
 
-- 必须先调用 `create_src_repro_plan`
-- 在 `create_src_repro_plan` 完成前，不得先调用执行型工具
-- 执行中使用 `get_src_repro_plan` / `update_src_repro_plan_step` 维护状态
+- 必须先调用 `create_src_plan`
+- 在 `create_src_plan` 完成前，不得先调用执行型工具
+- 执行中使用 `get_src_plan` / `update_src_plan_step` 维护状态
 - 在 `/src` reproducer 中禁止使用通用 `todo` 工具
 - 最终按 4 个部分输出：
   - `## 1) Execution Todo`
@@ -112,11 +113,11 @@ Reproducer 直接读取 `report_text` 执行，不再接收 planner 产物。
 
 当前 TUI 已对 `/src` 步骤工具做单独展示收口：
 
-- `create_src_repro_plan`
+- `create_src_plan`
   - 首次在左侧聊天区全量展示步骤合同
-- `get_src_repro_plan`
+- `get_src_plan`
   - 左侧仅展示简版快照，不再默认铺开完整步骤细节
-- `update_src_repro_plan_step`
+- `update_src_plan_step`
   - 改为增量返回
   - 左侧仅展示本次更新到的步骤与简短汇总
 
@@ -184,9 +185,9 @@ Reproducer 直接读取 `report_text` 执行，不再接收 planner 产物。
 
 当前包含：
 
-- `create_src_repro_plan`
-- `get_src_repro_plan`
-- `update_src_repro_plan_step`
+- `create_src_plan`
+- `get_src_plan`
+- `update_src_plan_step`
 - `save_src_repro_bundle`
 
 ### `/src` 专用 renderer
@@ -209,9 +210,9 @@ Reproducer 直接读取 `report_text` 执行，不再接收 planner 产物。
 - `/src run` 跳过 analyzer
 - `/src` 专用步骤工具已接入
 - `/src` 专用 renderer 已接入
-- `create_src_repro_plan` 首次全量展示已收口
-- `update_src_repro_plan_step` 已改为增量返回
-- `get_src_repro_plan` 左侧已改为简版快照展示
+- `create_src_plan` 首次全量展示已收口
+- `update_src_plan_step` 已改为增量返回
+- `get_src_plan` 左侧已改为简版快照展示
 - 右侧 sidebar 已新增 `SRC 状态` 简版步骤状态区
 - analyzer 已收紧为“只拦明显无法开始复现”的报告口径
 - reproducer 已补充“联合场景至少拆 3 步”与“Caido/代理错误页应判 blocked”的规则
@@ -316,7 +317,7 @@ python -m pytest -o addopts='' tests/skills/test_src_repro_skills.py -q
 
 虽然当前已经落地：
 
-- 先 `create_src_repro_plan`
+- 先 `create_src_plan`
 - 再执行
 - 执行中维护步骤状态
 - 宿主层阻止 `/src` reproducer 在建 plan 之前直接调用执行型工具
@@ -330,7 +331,7 @@ python -m pytest -o addopts='' tests/skills/test_src_repro_skills.py -q
 
 ### 6.5 `/src` 计划工具当前仍是全局注册
 
-当前 `create_src_repro_plan` / `get_src_repro_plan` / `update_src_repro_plan_step`：
+当前 `create_src_plan` / `get_src_plan` / `update_src_plan_step`：
 
 - 已通过执行流和 skill 约束，逻辑上只服务于 `/src` reproducer
 - 宿主层也已对 `/src` reproducer 增加 plan-before-execute 限制
@@ -357,6 +358,37 @@ python -m pytest -o addopts='' tests/skills/test_src_repro_skills.py -q
 - 当前 run 目录里还没有结构化的 `src_repro_plan.json`
 - 后续若要做更强的审计、重放或 UI 二次展示，仍需要结构化落盘
 
+### 6.7 修复后的复现验证尚未纳入当前 `/src`
+
+当前 `/src` 更适合作为企业 SRC 的**第一阶段能力**：
+
+- 外部白帽提交漏洞报告后
+- 内部安全团队或运营人员读取报告
+- 判断是否可尝试复现
+- 跑通有界复现链并给研发提供修复输入
+
+但它**尚未**覆盖企业 SRC 的第二阶段：
+
+- 研发修复后的正式回归验证
+- 在固定前提下重复执行同一漏洞链
+- 比对“修复前 / 修复后”是否仍命中成功标志
+- 在更稳定的登录态、测试账号、测试环境下做回归确认
+
+这部分与当前第一阶段 `/src` 的工程目标不同，后续应作为单独能力规划，而不是继续塞入当前 `/src` 主链。
+
+如果后续进入“修复后的复现验证”阶段，预计会涉及：
+
+- 固定测试账号或凭据库
+- 登录前置流程或会话复用
+- 更稳定的 regression replay 输入
+- 修复前后 verdict 对比
+- 更适合回归的结构化落盘与对比输出
+
+因此当前结论是：
+
+- 第一阶段 `/src`：已基本成型，继续做真实报告回归验证
+- 第二阶段“修复后的复现验证”：单独规划，不在当前主链中强行并入
+
 ## 7. 下一步建议
 
 建议按以下顺序推进：
@@ -375,10 +407,15 @@ python -m pytest -o addopts='' tests/skills/test_src_repro_skills.py -q
    - 普通登录态 XSS
    - UI + API 混合场景
    - 历史凭据仅作证据、不作当前输入的案例
+7. 单独规划第二阶段“修复后的复现验证”能力，先明确：
+   - 是否复用当前 `/src` 命令族还是新增子命令
+   - 是否引入固定测试账号 / 凭据库 / 登录前置流程
+   - 是否需要结构化保存“修复前基线”与“修复后结果”
+   - 是否在 regression 模式下对 verdict 做更严格的对比收口
 
 ## 8. 当前结论
 
-当前 `/src` 已经完成第一版主链路收口：
+当前 `/src` 已经完成第一版主链路收口，并更适合承担**第一阶段：漏洞报告驱动的内部复现验证**：
 
 - 主流程已简化
 - 多余支线已移除
@@ -387,8 +424,9 @@ python -m pytest -o addopts='' tests/skills/test_src_repro_skills.py -q
 
 但它还不是最终形态。
 
-当前最重要的后续工作不是再加更多分支，而是继续集中做以下几件事：
+当前最重要的后续工作不是继续把更多能力硬塞进第一阶段 `/src`，而是：
 
 - 让 analyzer 判定更稳
 - 让左侧与右侧的 `/src` 展示职责进一步分离
 - 把已经落地的 `/src` 专用步骤合同继续往“可审计、可落盘、可校验”方向收口
+- 单独规划第二阶段“修复后的复现验证”，避免与当前第一阶段主链耦合过早

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
 from .contracts import SrcReproAnalysis, SrcReproBundle
 from .result_parser import parse_analysis
+
+_VERDICT_LINE_PATTERN = re.compile(r"^\s*(?:-\s*)?verdict\s*:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
 
 
 def save_src_repro_bundle(
@@ -101,7 +104,21 @@ def _write_json(path: Path, content: dict[str, Any]) -> Path:
 
 
 def _extract_verdict_label(final_verdict: str) -> str:
+    match = _VERDICT_LINE_PATTERN.search(final_verdict)
+    if match:
+        normalized = _normalize_verdict_label(match.group(1))
+        if normalized is not None:
+            return normalized
+
     lowered = final_verdict.lower()
+    if "still reproducible" in lowered:
+        return "still reproducible"
+    if "仍可复现" in final_verdict:
+        return "still reproducible"
+    if "fixed" in lowered:
+        return "fixed"
+    if "修复已验证" in final_verdict or "已修复" in final_verdict:
+        return "fixed"
     if "not reproducible" in lowered:
         return "not reproducible"
     if "不可复现" in final_verdict:
@@ -115,6 +132,19 @@ def _extract_verdict_label(final_verdict: str) -> str:
     if "阻塞" in final_verdict:
         return "blocked"
     return "unknown"
+
+
+def _normalize_verdict_label(value: str) -> str | None:
+    normalized = value.strip().lower()
+    if normalized in {
+        "still reproducible",
+        "fixed",
+        "not reproducible",
+        "reproducible",
+        "blocked",
+    }:
+        return normalized
+    return None
 
 
 __all__ = ["save_src_repro_bundle", "_get_src_repro_dir"]
